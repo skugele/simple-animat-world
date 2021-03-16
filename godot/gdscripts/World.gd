@@ -23,11 +23,11 @@ const ZOOM_OUT_DIRECTION = 1
 onready var agent_comm = $ZeroMqComm
 onready var pub_context = null
 onready var pub_options = {
-	'agent':1234,
 	'port':9001, 
 	'protocol':'tcp'
 }
 
+# TODO: This doesn't do anything yet. Need to modify action listener to accept a dictionary of arguments
 onready var server_options = {
 	'port':9002, 
 	'protocol':'tcp'
@@ -37,29 +37,20 @@ onready var server_options = {
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	create_world()
+	init_camera()	
+	init_agent_comm()
 	
-	# adds camera to agent
+	create_world()
+
+func init_camera():
 	camera = Camera2D.new()
 	camera.current = true
 	camera.zoom = Vector2(DEFAULT_ZOOM, DEFAULT_ZOOM)
 	
 	camera.smoothing_enabled = Globals.CAMERA_SMOOTHING_ENABLED
 	if Globals.CAMERA_SMOOTHING_ENABLED:
-		camera.smoothing_speed = Globals.CAMERA_SMOOTHING_SPEED
+		camera.smoothing_speed = Globals.CAMERA_SMOOTHING_SPEED	
 	
-	var agents = $Agents.get_children()
-	for agent in agents:
-		add_agent_signal_handlers(agent)
-		print("registering agent with id ", agent.id)
-		agent_registry[agent.id] = agent
-	
-	set_followed_agent_id(agents[0].id)
-	
-	init_agent_comm()
-	
-	
-
 func init_agent_comm():
 	pub_context = agent_comm.connect(pub_options)
 	agent_comm.start_listener(server_options)
@@ -119,43 +110,44 @@ func create_objects(scene, locations, parent):
 
 func spawn(n, scene, parent):
 	
-	for i in range(n):
+	for obj in range(n):
 		create_objects(scene, 
-			[Vector2(rand_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]), 
-					 rand_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))], 
+			[Vector2(Globals.RNG.randf_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]), 
+					 Globals.RNG.randf_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))], 
 			parent)	
 	
 func create_random_objects():
 	
-	for i in range(Globals.N_RANDOM_FOOD):
-		create_objects("res://scenes/Food.tscn", 
-			[Vector2(rand_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]), 
-					 rand_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))], 
-			$Food)
-
-#	for i in range(Globals.N_RANDOM_ROCKS):
-#		create_objects("res://objects/simple/rock-obstacle.tscn", 
-#			[Vector2(rand_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]),
-#					 rand_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))], 
-#			$Rocks)
+	var n_food_to_spawn = Globals.N_RANDOM_FOOD - $Food.get_child_count()
+	if (n_food_to_spawn > 0):
+		spawn(n_food_to_spawn, "res://scenes/Food.tscn", $Food)
+		
+	var n_agents_to_spawn = Globals.N_AGENTS - $Agents.get_child_count()
+	if (n_agents_to_spawn > 0):
+		spawn(n_agents_to_spawn, "res://scenes/Agent.tscn", $Agents)
 
 	# this should never print anything. if it does, then there may be a memory leak
 	print_stray_nodes()	
 							
 func create_world():
-		# TODO: Load objects from a saved world file (e.g., a JSON file)
+	# TODO: Load objects from a saved world file (e.g., a JSON file)
 #	load_objects()
 	
 	if Globals.RANDOMIZED:
 		create_random_objects()	
 		
-	# installs signal handlers
-#	for node in $Food.get_children():
-#		add_food_signal_handlers(node)
-		
-	for node in $Agents.get_children():
-		add_agent_signal_handlers(node)	
+	init_objects()	
 
+func init_objects():
+	# initialize agents
+	var agents = $Agents.get_children()
+	for agent in agents:
+		add_agent_signal_handlers(agent)
+		agent_registry[agent.id] = agent
+	
+#	if len(agents) > 0:
+	set_followed_agent_id(agents[0].id)
+	
 func set_followed_agent_id(id):
 	if followed_agent_id != null:
 		agent_registry[followed_agent_id].remove_child(camera)
@@ -165,13 +157,11 @@ func set_followed_agent_id(id):
 		followed_agent_id = id
 	
 func zoom_in():
-	print('zooming in')
 	if camera and zoom - ZOOM_DELTA >= MAX_ZOOM_IN:
 		zoom -= ZOOM_DELTA
 		update_camera_zoom(ZOOM_IN_DIRECTION)
 	
 func zoom_out():
-	print('zooming out')
 	if camera and zoom + ZOOM_DELTA <= MAX_ZOOM_OUT:
 		update_camera_zoom(ZOOM_OUT_DIRECTION)
 		

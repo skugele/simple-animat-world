@@ -2,6 +2,9 @@
 
 extends Node
 
+var RNG_SEED = 8675309 
+var RNG = RandomNumberGenerator.new()
+
 #############
 # constants #
 #############
@@ -22,11 +25,11 @@ const CAMERA_SMOOTHING_SPEED = 2
 ###############################
 # Environment Characteristics #
 ###############################
-const STATIC = false
 const RANDOMIZED = true
 
 const N_RANDOM_FOOD = 15
 const N_RANDOM_OBS = 175
+const N_AGENTS = 1
 
 const WORLD_HORIZ_EXTENT = [0, 9000]
 const WORLD_VERT_EXTENT = [-4100, 4500]
@@ -87,6 +90,11 @@ var global_id = 0 # should never be acessed directly (use generate_unique_id)
 # thread locks (mutexes)
 var global_id_mutex = Mutex.new() # used in generate_unique_id function
 
+func _ready():
+	# BUG: Seed doesn't seem to have any effect.
+	RNG.seed = RNG_SEED
+	RNG.randomize()
+
 ##########################
 # synchronized functions #
 ##########################
@@ -122,4 +130,3 @@ func get_elapsed_time():
 	milliseconds = remainder % 1000	
 	
 	return [days, hours, minutes, seconds, milliseconds]
-
