@@ -1,0 +1,30 @@
+[gd_scene load_steps=6 format=2]
+
+[ext_resource path="res://graphics/simple-geometric-shapes.png" type="Texture" id=1]
+[ext_resource path="res://gdscripts/Agent.gd" type="Script" id=2]
+[ext_resource path="res://scenes/Mouth.tscn" type="PackedScene" id=3]
+[ext_resource path="res://scenes/AgentStats.tscn" type="PackedScene" id=4]
+
+[sub_resource type="CircleShape2D" id=1]
+radius = 100.0
+
+[node name="Agent" type="KinematicBody2D"]
+collision_layer = 2
+collision_mask = 7
+script = ExtResource( 2 )
+
+[node name="AgentStats" parent="." instance=ExtResource( 4 )]
+
+[node name="BodySprite" type="Sprite" parent="."]
+modulate = Color( 0.101961, 0.219608, 0.533333, 1 )
+texture = ExtResource( 1 )
+region_enabled = true
+region_rect = Rect2( 0, 0, 201, 201 )
+
+[node name="BodyCollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource( 1 )
+
+[node name="Mouth" parent="." instance=ExtResource( 3 )]
+modulate = Color( 0, 0.368627, 1, 1 )
+position = Vector2( 0, -99 )
+[connection signal="edible_consumed" from="Mouth" to="." method="_on_edible_consumed"]
