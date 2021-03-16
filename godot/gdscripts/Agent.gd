@@ -31,6 +31,10 @@ func print_stats():
 	print('agent %s\'s satiety: %s' % [id, stats.satiety])
 		
 func add_action(action):
+	if len(pending_actions) > Globals.MAX_PENDING_ACTIONS:
+		pending_actions.pop_front()
+		print('Max queue depth reached. Dropping oldest pending action.')
+		
 	pending_actions.push_back(action)
 
 func execute(actions, delta):
@@ -41,17 +45,29 @@ func execute(actions, delta):
 	# FIXME: this is a hack to allow a different forward and reverse max speed
 	var max_speed = 0
 
-	# forward/backward motion
-	if actions[Globals.AGENT_ACTIONS.FORWARD]:
+	# linear motion	
+	
+	if actions[Globals.AGENT_ACTIONS.BACKWARD] and actions[Globals.AGENT_ACTIONS.FORWARD]:
+		# both forward and backward actions together result in a net-zero linear displacement	
+		pass		
+	
+	elif actions[Globals.AGENT_ACTIONS.FORWARD]:
 		direction = Vector2(0, -1).rotated(rotation)
-		max_speed = Globals.AGENT_MAX_SPEED_FORWARD	
-	elif actions[Globals.AGENT_ACTIONS.BACKWARD]:
+		max_speed = Globals.AGENT_MAX_SPEED_FORWARD		
+	
+	elif actions[Globals.AGENT_ACTIONS.BACKWARD]:		
 		direction = Vector2(0, 1).rotated(rotation)
 		max_speed = Globals.AGENT_MAX_SPEED_BACKWARD	
+		
 #
-#	# body rotation
-	if actions[Globals.AGENT_ACTIONS.TURN_RIGHT]:
+#	# angular movement
+	if actions[Globals.AGENT_ACTIONS.TURN_RIGHT] and actions[Globals.AGENT_ACTIONS.TURN_LEFT]:
+		# both right and left turn actions together result in a net-zero turn	
+		pass		
+		
+	elif actions[Globals.AGENT_ACTIONS.TURN_RIGHT]:
 		turn += 1.0
+		
 	elif actions[Globals.AGENT_ACTIONS.TURN_LEFT]:
 		turn -= 1.0
 
