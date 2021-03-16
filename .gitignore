@@ -1,3 +1,5 @@
+# PyCharm specific
+.idea
 
 # Godot-specific ignores
 .import/
