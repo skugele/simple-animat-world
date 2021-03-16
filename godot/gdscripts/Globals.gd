@@ -2,7 +2,7 @@
 
 extends Node
 
-var RNG_SEED = 8675309 
+var RNG_SEED = 1 
 var RNG = RandomNumberGenerator.new()
 
 #############
@@ -91,9 +91,8 @@ var global_id = 0 # should never be acessed directly (use generate_unique_id)
 var global_id_mutex = Mutex.new() # used in generate_unique_id function
 
 func _ready():
-	# BUG: Seed doesn't seem to have any effect.
-	RNG.seed = RNG_SEED
-	RNG.randomize()
+	randomize()
+	seed(RNG_SEED)
 
 ##########################
 # synchronized functions #

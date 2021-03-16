@@ -112,8 +112,8 @@ func spawn(n, scene, parent):
 	
 	for obj in range(n):
 		create_objects(scene, 
-			[Vector2(Globals.RNG.randf_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]), 
-					 Globals.RNG.randf_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))], 
+			[Vector2(rand_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]), 
+					 rand_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))], 
 			parent)	
 	
 func create_random_objects():
