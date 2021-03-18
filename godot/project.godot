@@ -74,6 +74,8 @@ ui_zoom_out={
 2d_physics/layer_2="Agents"
 2d_physics/layer_3="Edibles"
 2d_physics/layer_4="Edible Detector"
+2d_physics/layer_5="Smells"
+2d_physics/layer_6="Smell Detector"
 
 [rendering]
 

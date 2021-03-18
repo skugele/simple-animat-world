@@ -6,4 +6,3 @@
 script = ExtResource( 1 )
 
 [node name="ScentAreas" type="Node2D" parent="."]
-position = Vector2( 0, -57 )

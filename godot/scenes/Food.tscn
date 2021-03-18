@@ -1,7 +1,8 @@
-[gd_scene load_steps=4 format=2]
+[gd_scene load_steps=5 format=2]
 
 [ext_resource path="res://graphics/simple-geometric-shapes.png" type="Texture" id=1]
 [ext_resource path="res://gdscripts/Food.gd" type="Script" id=2]
+[ext_resource path="res://scenes/SmellEmitter.tscn" type="PackedScene" id=3]
 
 [sub_resource type="ConvexPolygonShape2D" id=1]
 points = PoolVector2Array( -92.896, -21.437, -21.437, -22.231, 0.364, -88.902, 22.984, -24.215, 91.64, -22.231, 34.89, 23.407, 57.907, 93.65, 1.158, 50.593, -57.179, 92.856, -35.353, 22.217 )
@@ -18,9 +19,10 @@ region_enabled = true
 region_rect = Rect2( 1791, 6, 195, 195 )
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+visible = false
 shape = SubResource( 1 )
 
-[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="."]
-visible = false
-polygon = PoolVector2Array( -92.8959, -21.4369, -21.4628, -22.2306, 0.363953, -88.9015, 22.9844, -24.2149, 91.6396, -22.2306, 34.89, 23.4072, 57.9073, 93.6498, 1.15765, 50.3931, -57.1794, 92.8561, -35.3526, 22.2167 )
-disabled = true
+[node name="SmellEmitter" parent="." instance=ExtResource( 3 )]
+modulate = Color( 0.231373, 0.180392, 0.407843, 0.2 )
+self_modulate = Color( 1, 1, 1, 0.752941 )
+show_behind_parent = true

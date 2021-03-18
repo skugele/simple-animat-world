@@ -29,7 +29,7 @@ const RANDOMIZED = true
 
 const N_RANDOM_FOOD = 15
 const N_RANDOM_OBS = 175
-const N_AGENTS = 2
+const N_AGENTS = 1
 
 const WORLD_HORIZ_EXTENT = [0, 9000]
 const WORLD_VERT_EXTENT = [-4100, 4500]
@@ -84,6 +84,18 @@ enum AGENT_ACTIONS {
 
 const MAX_PENDING_ACTIONS = 50
 
+const SMELL_DIMENSIONS = 4
+const SMELL_DETECTABLE_RADIUS = 1000.0
+const SMELL_DISTANCE_MULTIPLIER = 5.0
+const SMELL_DISTANCE_EXPONENT = 3.0
+
+# base smells and tastes
+var NULL_SMELL = get_sensory_vector([])
+
+var SENSORS_STATE_TOPIC_FORMAT = '/agents/{agent_id}/sensors'
+
+var OLFACTORY_SENSOR_ID = 'SMELL'
+
 ##############################################
 # modifiable global state (USE WITH CAUTION) #
 ##############################################
@@ -131,3 +143,80 @@ func get_elapsed_time():
 	milliseconds = remainder % 1000	
 	
 	return [days, hours, minutes, seconds, milliseconds]
+
+# assume vectors have same length
+func add_vectors(v1, v2):
+	var result = v1.duplicate()
+	
+	var i = 0
+	while i < len(v1):
+		result[i] += v2[i]
+		i += 1
+		
+	return result		
+
+func add_vector_array(array):
+	if array == null or len(array) == 0:
+		return null
+		
+	var result = array.pop_front()
+	for v in array:
+		result = add_vectors(result, v)
+		
+	return result		
+	
+func zero_vector(dims):
+	var new_vector = []
+	for d in dims:
+		new_vector.append(0)
+		
+	return new_vector
+
+# "scales" an array by some scalar value
+func scale(array, scalar):
+	if array == null or len(array) == 0:
+		return array
+		
+	var new_array = array.duplicate()
+	
+	var pos = 0
+	while pos < len(new_array):
+		new_array[pos] *= scalar
+		pos += 1
+		
+	return new_array	
+	
+func get_magnitude(vector):
+	var value = 0.0
+	
+	for element in vector:
+		value += pow(element, 2)
+		
+	return sqrt(value)
+	
+func normalize(vector):
+	var magnitude = get_magnitude(vector)
+	if magnitude == 0:
+		return vector		
+		
+	return	scale(vector, 1.0 / magnitude)
+	
+func get_sensory_vector(active_elements):
+	var vector = []
+	
+	# check for active and set to 1 else 0
+	var i = 0
+	while i < SMELL_DIMENSIONS:
+		
+		# not active
+		if active_elements.find(i) == -1:
+			vector.append(0)
+			
+		# active
+		else:
+			vector.append(1)
+			
+		i += 1
+				
+	# normalize vector
+	return normalize(vector)

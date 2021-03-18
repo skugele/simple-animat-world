@@ -53,7 +53,7 @@ func init_camera():
 	
 func init_agent_comm():
 	pub_context = agent_comm.connect(pub_options)
-	agent_comm.start_listener(server_options)
+	agent_comm.start_listener(server_options)	
 	
 	
 func _process(delta):
@@ -66,7 +66,28 @@ func _process(delta):
 	if (n_food_to_spawn > 0):
 		spawn(n_food_to_spawn, "res://scenes/Food.tscn", $Food)
 	
-	# check
+	# publish agents' state
+	for agent in agent_registry.values():
+		publish_sensors_state(agent)
+
+func get_sensors_topic(agent):
+	return Globals.SENSORS_STATE_TOPIC_FORMAT.format({'agent_id':agent.id})
+	
+func get_sensors_message(agent):
+	var msg = {}
+	
+	# add smell sensor
+	msg[Globals.OLFACTORY_SENSOR_ID] = agent.active_scents_combined
+	
+	return msg
+	
+func publish_sensors_state(agent):
+	var topic = get_sensors_topic(agent)
+	var msg = get_sensors_message(agent)
+	
+#	print('publishing to topic ', topic)
+	print('message: ', msg)
+	agent_comm.send(msg, pub_context, topic)
 
 func has_collision(obj):
 	var space_rid = get_world_2d().space

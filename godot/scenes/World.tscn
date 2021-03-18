@@ -7,7 +7,7 @@
 [node name="World" type="Node2D"]
 script = ExtResource( 4 )
 teleop_enabled = true
-followed_agent_id = 1
+followed_agent_id = 16
 
 [node name="Agents" type="Node2D" parent="."]
 

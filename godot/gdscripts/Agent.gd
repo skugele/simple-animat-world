@@ -1,11 +1,19 @@
 extends KinematicBody2D
 
-################
-# onready vars #
-################
+# a unique identifier for the agent
 onready var id = null
 
+# a list of actions pending execution
 onready var pending_actions = []
+
+###############
+# sensor vars #
+###############
+onready var active_scents = {} # dictionary of scent emitters ids -> active scent areas
+onready var active_scents_combined = Globals.NULL_SMELL
+
+onready var ignored_scents = [] # ignore own smells
+onready var combined_scent_sig = null
 
 ###########
 # signals #
@@ -17,14 +25,25 @@ signal agent_consumed_edible(agent, edible)
 onready var velocity = Vector2.ZERO setget set_velocity
 onready var stats = $AgentStats
 
+###############################
+# built-in function overrides #
+###############################
+
 # Called when the node enters the scene tree for the first time.
 func _ready():
 	id = Globals.generate_unique_id()
 
 func _process(delta):
+	
+	# (1) execute next pending action(s) -- parallel action execution is possible
 	var actions = pending_actions.pop_front()
 	if actions:
 		execute(actions, delta)
+		
+	# (2) update state variables
+	active_scents_combined = get_combined_scent(active_scents)
+		
+		
 	
 func print_stats():	
 	print('agent %s\'s health: %s' % [id, stats.health])
@@ -96,6 +115,65 @@ func set_rotation(degrees):
 	
 func set_velocity(value):
 	velocity = value
+
+func add_scent(scent):	
+#	print('agent %s smells scent %s with signature %s' % [self, scent, scent.signature])
+	
+	if active_scents.has(scent.smell_emitter_id):
+		active_scents[scent.smell_emitter_id].push_back(scent)
+	else:
+		active_scents[scent.smell_emitter_id] = [scent]
+
+func remove_scent(scent):
+#	print('agent %s lost scent %s with signature %s' % [self, scent, scent.signature])
+	
+	if len(active_scents[scent.smell_emitter_id]) <= 1:
+		active_scents.erase(scent.smell_emitter_id)
+	else:
+		var removed_scent = active_scents[scent.smell_emitter_id].pop_back()
+	
+func distance_from_scent(scent):
+	if scent == null:
+		return null
+		
+	var distance = Globals.SMELL_DETECTABLE_RADIUS
+	var detector_pos = $SmellDetector.global_position
+		
+	if scent.is_inside_tree():
+		var scent_pos = scent.global_position		
+		distance = min(distance, detector_pos.distance_to(scent_pos))
+	
+	return distance
+	
+func get_combined_scent(active_scents):
+	var combined_scent_sig = Globals.NULL_SMELL
+
+	for id in active_scents.keys():
+		var scent = active_scents[id][-1]
+		
+		var distance = distance_from_scent(scent)
+		if distance == null:
+			continue
+
+		# maps distance onto the range [0, 1]
+		var d_effective = distance / Globals.SMELL_DETECTABLE_RADIUS
+		var scaling_factor = 1.0 / (pow(Globals.SMELL_DISTANCE_MULTIPLIER * d_effective, 
+										Globals.SMELL_DISTANCE_EXPONENT) + 1.0)
+
+		var scaled_scent = Globals.scale(scent.signature, scaling_factor)
+
+		combined_scent_sig = Globals.add_vectors(combined_scent_sig, scaled_scent)
+		
+	return combined_scent_sig
+
+###################
+# Signal Handlers #
+###################
+func _on_smell_detected(scent):
+	add_scent(scent)
+
+func _on_smell_lost(scent):
+	remove_scent(scent)
 
 func _on_edible_consumed(edible):
 	emit_signal("agent_consumed_edible", self, edible)
