@@ -78,6 +78,7 @@ func get_sensors_message(agent):
 	
 	# add smell sensor
 	msg[Globals.OLFACTORY_SENSOR_ID] = agent.active_scents_combined
+	msg[Globals.TACTILE_SENSOR_ID] = agent.active_tactile_events > 0
 	
 	return msg
 	
@@ -86,7 +87,7 @@ func publish_sensors_state(agent):
 	var msg = get_sensors_message(agent)
 	
 #	print('publishing to topic ', topic)
-	print('message: ', msg)
+#	print('message: ', msg)
 	agent_comm.send(msg, pub_context, topic)
 
 func has_collision(obj):

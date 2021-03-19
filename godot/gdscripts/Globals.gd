@@ -95,6 +95,7 @@ var NULL_SMELL = get_sensory_vector([])
 var SENSORS_STATE_TOPIC_FORMAT = '/agents/{agent_id}/sensors'
 
 var OLFACTORY_SENSOR_ID = 'SMELL'
+var TACTILE_SENSOR_ID = 'TOUCH'
 
 ##############################################
 # modifiable global state (USE WITH CAUTION) #

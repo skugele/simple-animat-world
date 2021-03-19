@@ -15,6 +15,8 @@ onready var active_scents_combined = Globals.NULL_SMELL
 onready var ignored_scents = [] # ignore own smells
 onready var combined_scent_sig = null
 
+onready var active_tactile_events = 0
+
 ###########
 # signals #
 ###########
@@ -177,3 +179,11 @@ func _on_smell_lost(scent):
 
 func _on_edible_consumed(edible):
 	emit_signal("agent_consumed_edible", self, edible)
+
+func _on_tactile_event(body):
+	if body != self:
+		active_tactile_events += 1
+
+func _on_tactile_event_ends(body):
+	if body != self:
+		active_tactile_events -= 1

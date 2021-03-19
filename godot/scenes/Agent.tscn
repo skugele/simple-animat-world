@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=2]
+[gd_scene load_steps=8 format=2]
 
 [ext_resource path="res://graphics/simple-geometric-shapes.png" type="Texture" id=1]
 [ext_resource path="res://gdscripts/Agent.gd" type="Script" id=2]
@@ -8,6 +8,9 @@
 
 [sub_resource type="CircleShape2D" id=1]
 radius = 100.0
+
+[sub_resource type="CircleShape2D" id=2]
+radius = 102.226
 
 [node name="Agent" type="KinematicBody2D"]
 collision_layer = 2
@@ -31,6 +34,13 @@ position = Vector2( 0, -99 )
 
 [node name="SmellDetector" parent="." instance=ExtResource( 5 )]
 position = Vector2( 0, -153 )
+
+[node name="TactileSensor" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TactileSensor"]
+shape = SubResource( 2 )
 [connection signal="edible_consumed" from="Mouth" to="." method="_on_edible_consumed"]
 [connection signal="smell_detected" from="SmellDetector" to="." method="_on_smell_detected"]
 [connection signal="smell_lost" from="SmellDetector" to="." method="_on_smell_lost"]
+[connection signal="body_entered" from="TactileSensor" to="." method="_on_tactile_event"]
+[connection signal="body_exited" from="TactileSensor" to="." method="_on_tactile_event_ends"]
