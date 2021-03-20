@@ -13,7 +13,7 @@ DEFAULT_SENSORS_PORT = 9001
 
 N_ACTIONS = 4
 ACTION_VALUES = [True, False]
-ACTION_REPEAT_COUNT = 20
+ACTION_REPEAT_COUNT = 10
 
 
 def parse_args():
@@ -32,7 +32,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def establish_connection(args):
+def establish_connection():
     context = zmq.Context()
 
     socket = context.socket(zmq.REQ)
@@ -44,20 +44,35 @@ def establish_connection(args):
     return socket
 
 
-def send_request(connection, request):
+def send_action(connection, request):
     request_as_json = json.dumps(request)
     if args.verbose:
         print("request: ", request_as_json)
 
     connection.send_string(request_as_json)
-
-
-def receive_reply(connection, args):
     reply = connection.recv_json()
     if args.verbose:
         print("reply: ", reply)
 
-    return reply
+
+def receive_state(connection):
+    # receive sensor updates
+    msg = connection.recv_string()
+
+    topic, content = split(msg)
+
+    # unmarshal JSON message content
+    obj = json.loads(content)
+
+    if args.verbose:
+        print('new message on topic: ', topic)
+        print('header: ', obj['header'])
+        print('data: ', obj['data'])
+        print('')
+    else:
+        print(content)
+
+    return content
 
 
 def build_action_message(id, actions):
@@ -117,53 +132,40 @@ def establish_sensor_conn(context, args):
     return socket
 
 
-def establish_connections(args):
+def establish_connections():
     context = zmq.Context()
 
-    connections = {}
-    connections['sensors'] = establish_sensor_conn(context, args)
-    connections['actions'] = establish_action_conn(context, args)
+    connections = {
+        'sensors': establish_sensor_conn(context, args),
+        'actions': establish_action_conn(context, args)
+    }
 
     return connections
 
 
-if __name__ == "__main__":
-    try:
-        # parse command line arguments
-        args = parse_args()
+def run():
+    # establish connection to Godot action server
+    connections = establish_connections()
 
-        # establish connection to Godot action server
-        connections = establish_connections(args)
+    # action loop
+    while True:
 
         # create action request
-        while True:
+        action = build_action_message(id=args.id,
+                                      actions=select_random_actions(N_ACTIONS))
 
-            # send actions
-            request = build_action_message(id=args.id,
-                                           actions=select_random_actions(N_ACTIONS))
+        # execute each action-sense multiple times
+        for i in range(ACTION_REPEAT_COUNT):
+            send_action(connections['actions'], action)
+            state = receive_state(connections['sensors'])
 
-            for i in range(ACTION_REPEAT_COUNT):
-                send_request(connections['actions'], request)
-                reply = receive_reply(connections['actions'], args)
 
-                # receive sensor updates
-                msg = connections['sensors'].recv_string()
+if __name__ == "__main__":
+    # parse command line arguments
+    args = parse_args()
 
-                topic, content = split(msg)
-
-                # unmarshal JSON message content
-                obj = json.loads(content)
-
-                if args.verbose:
-                    print('new message on topic: ', topic)
-                    print('header: ', obj['header'])
-                    print('data: ', obj['data'])
-                    print('')
-                else:
-                    print(content)
-
-                # sleep(0.1)
-
+    try:
+        run()
     except KeyboardInterrupt:
 
         try:
