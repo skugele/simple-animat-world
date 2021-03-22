@@ -1,0 +1,1 @@
+from gym_godot.envs.simple_animat import SimpleAnimatWorld
