@@ -34,28 +34,28 @@ func _ready():
 func _process(delta):
 	
 	# satiety decreased
-	satiety -= Globals.SATIETY_DECREASE_PER_FRAME * delta
+	set_satiety(satiety - Globals.SATIETY_DECREASE_PER_FRAME * delta)
 	
 	# energy increased
-	energy += Globals.ENERGY_INCREASE_PER_FRAME * delta
+	# set_energy(energy + Globals.ENERGY_INCREASE_PER_FRAME * delta)
 	
 	# if starving
 	if is_starving():
-		health -= Globals.STARVING_DAMAGE_PER_FRAME * delta
+		set_health(health - Globals.STARVING_DAMAGE_PER_FRAME * delta)
 			
 	# if poisoned
-	if is_poisoned():
-		health -= Globals.POISON_DAMAGE_PER_FRAME * delta
-		poison_consumed -= Globals.POISON_DECREASE_PER_FRAME * delta	
+#	if is_poisoned():
+#		health -= Globals.POISON_DAMAGE_PER_FRAME * delta
+#		poison_consumed -= Globals.POISON_DECREASE_PER_FRAME * delta	
 	
 	# if injured
-	if is_injured():
-
-		# there is an energy cost to healing 
-		# (and no healing when exhaused, starving, or poisoned)		
-		if not (is_exhausted() or is_poisoned() or is_starving()):
-			health += Globals.HEALTH_INCREASE_PER_FRAME * delta
-			energy -= Globals.ENERGY_DECREASE_WHILE_HEALING_PER_FRAME * delta			
+#	if is_injured():
+#
+#		# there is an energy cost to healing 
+#		# (and no healing when exhaused, starving, or poisoned)		
+#		if not (is_exhausted() or is_poisoned() or is_starving()):
+#			health += Globals.HEALTH_INCREASE_PER_FRAME * delta
+#			energy -= Globals.ENERGY_DECREASE_WHILE_HEALING_PER_FRAME * delta			
 			
 # TODO: These update functions may need to be synchronized	
 func set_health(value):
@@ -100,3 +100,5 @@ func is_dead():
 func is_exhausted():
 	return energy <= 0
 
+func as_list():
+	return [health, energy, satiety]

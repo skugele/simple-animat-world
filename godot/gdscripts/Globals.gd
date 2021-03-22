@@ -27,7 +27,7 @@ const CAMERA_SMOOTHING_SPEED = 2
 ###############################
 const RANDOMIZED = true
 
-const N_RANDOM_FOOD = 15
+const N_RANDOM_FOOD = 200
 const N_RANDOM_OBS = 175
 const N_AGENTS = 1
 
@@ -39,11 +39,11 @@ const WORLD_VERT_EXTENT = [-4100, 4500]
 ###################
 const AGENT_INITIAL_HEALTH = 100
 const AGENT_INITIAL_ENERGY = 50
-const AGENT_INITIAL_SATIETY = 25
+const AGENT_INITIAL_SATIETY = 9000
 
 const AGENT_MAX_HEALTH = 100
 const AGENT_MAX_ENERGY = 100
-const AGENT_MAX_SATIETY = 100
+const AGENT_MAX_SATIETY = 10000
 
 # Time-based agent stats changes
 const SATIETY_DECREASE_PER_FRAME = 0.1
@@ -96,6 +96,7 @@ var SENSORS_STATE_TOPIC_FORMAT = '/agents/{agent_id}/sensors'
 
 var OLFACTORY_SENSOR_ID = 'SMELL'
 var TACTILE_SENSOR_ID = 'TOUCH'
+var SOMATO_SENSOR_ID = 'SOMATOSENSORY'
 
 ##############################################
 # modifiable global state (USE WITH CAUTION) #

@@ -77,6 +77,10 @@ ui_zoom_out={
 2d_physics/layer_5="Smells"
 2d_physics/layer_6="Smell Detector"
 
+[physics]
+
+common/physics_fps=30
+
 [rendering]
 
 environment/default_environment="res://default_env.tres"

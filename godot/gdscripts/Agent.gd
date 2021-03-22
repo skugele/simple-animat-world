@@ -33,10 +33,10 @@ onready var stats = $AgentStats
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	id = Globals.generate_unique_id()
+	id = 1 # Globals.generate_unique_id()
 
 func _process(delta):
-	
+
 	# (1) execute next pending action(s) -- parallel action execution is possible
 	var actions = pending_actions.pop_front()
 	if actions:
@@ -187,3 +187,7 @@ func _on_tactile_event(body):
 func _on_tactile_event_ends(body):
 	if body != self:
 		active_tactile_events -= 1
+
+
+func _on_death():
+	print("Agent {} is dead!".format(id))

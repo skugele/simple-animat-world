@@ -39,6 +39,7 @@ position = Vector2( 0, -153 )
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="TactileSensor"]
 shape = SubResource( 2 )
+[connection signal="agent_dead" from="AgentStats" to="." method="_on_death"]
 [connection signal="edible_consumed" from="Mouth" to="." method="_on_edible_consumed"]
 [connection signal="smell_detected" from="SmellDetector" to="." method="_on_smell_detected"]
 [connection signal="smell_lost" from="SmellDetector" to="." method="_on_smell_lost"]

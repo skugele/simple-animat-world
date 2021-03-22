@@ -6,7 +6,7 @@
 
 [node name="World" type="Node2D"]
 script = ExtResource( 4 )
-followed_agent_id = 16
+followed_agent_id = 1
 
 [node name="Agents" type="Node2D" parent="."]
 
@@ -23,10 +23,6 @@ scale = Vector2( 1, 20 )
 [node name="Wall2" parent="Walls" instance=ExtResource( 3 )]
 position = Vector2( 9000, 200 )
 scale = Vector2( 1, 20 )
-
-[node name="Wall3" parent="Walls" instance=ExtResource( 3 )]
-position = Vector2( 4357.41, 115.838 )
-scale = Vector2( 1, 10 )
 
 [node name="Wall4" parent="Walls" instance=ExtResource( 3 )]
 position = Vector2( 4509.35, 4538.46 )

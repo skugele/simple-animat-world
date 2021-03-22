@@ -78,7 +78,8 @@ func get_sensors_message(agent):
 	
 	# add smell sensor
 	msg[Globals.OLFACTORY_SENSOR_ID] = agent.active_scents_combined
-	msg[Globals.TACTILE_SENSOR_ID] = agent.active_tactile_events > 0
+	msg[Globals.TACTILE_SENSOR_ID] = 1 if agent.active_tactile_events else 0
+	msg[Globals.SOMATO_SENSOR_ID] = agent.stats.as_list()
 	
 	return msg
 	
@@ -140,14 +141,14 @@ func spawn(n, scene, parent):
 	
 func create_random_objects():
 	
+	var n_agents_to_spawn = Globals.N_AGENTS - $Agents.get_child_count()
+	if (n_agents_to_spawn > 0):
+		spawn(n_agents_to_spawn, "res://scenes/Agent.tscn", $Agents)
+		
 	var n_food_to_spawn = Globals.N_RANDOM_FOOD - $Food.get_child_count()
 	if (n_food_to_spawn > 0):
 		spawn(n_food_to_spawn, "res://scenes/Food.tscn", $Food)
 		
-	var n_agents_to_spawn = Globals.N_AGENTS - $Agents.get_child_count()
-	if (n_agents_to_spawn > 0):
-		spawn(n_agents_to_spawn, "res://scenes/Agent.tscn", $Agents)
-
 	# this should never print anything. if it does, then there may be a memory leak
 	print_stray_nodes()	
 							
@@ -222,8 +223,6 @@ func _on_agent_consumed_edible(agent, edible):
 		
 	# satiety is always increased after consuming edibles
 	agent.stats.satiety += Globals.SATIETY_PER_UNIT_FOOD
-	
-	agent.print_stats()
 		
 func _on_remote_action_received(action_details):
 	var id = action_details['agent_id']
