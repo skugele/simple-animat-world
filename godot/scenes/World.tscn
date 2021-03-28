@@ -7,6 +7,7 @@
 [node name="World" type="Node2D"]
 script = ExtResource( 4 )
 followed_agent_id = 1
+MAX_ZOOM_OUT = 16.0
 
 [node name="Agents" type="Node2D" parent="."]
 

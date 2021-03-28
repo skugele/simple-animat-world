@@ -22,7 +22,6 @@ onready var active_tactile_events = 0
 ###########
 signal agent_consumed_edible(agent, edible)
 
-
 # current agent state vars
 onready var velocity = Vector2.ZERO setget set_velocity
 onready var stats = $AgentStats
@@ -41,11 +40,15 @@ func _process(delta):
 	var actions = pending_actions.pop_front()
 	if actions:
 		execute(actions, delta)
+	else:
+		# apply friction
+		velocity = velocity.move_toward(Vector2.ZERO, Globals.AGENT_WALKING_FRICTION * delta)
 		
+	velocity = move_and_slide(velocity)
+	set_velocity(velocity)
+			
 	# (2) update state variables
 	active_scents_combined = get_combined_scent(active_scents)
-		
-		
 	
 func print_stats():	
 	print('agent %s\'s health: %s' % [id, stats.health])
@@ -58,6 +61,9 @@ func add_action(action):
 		
 	pending_actions.push_back(action)
 
+# actions are encodings of parallel actions as integers in the range [0, 2^(N_ACTIONS) - 1). bitwise operations
+# are used to determine the actions to execute. For example, the integer 13d = 1101b indicates that actions 1, 3, and 4
+# are to be executed in parallel.
 func execute(actions, delta):
 #	print('executing actions: ', actions)
 	var turn = 0
@@ -67,44 +73,37 @@ func execute(actions, delta):
 	var max_speed = 0
 
 	# linear motion	
-	
-	if actions[Globals.AGENT_ACTIONS.BACKWARD] and actions[Globals.AGENT_ACTIONS.FORWARD]:
+	if actions & Globals.AGENT_ACTIONS.BACKWARD and actions & Globals.AGENT_ACTIONS.FORWARD:
 		# both forward and backward actions together result in a net-zero linear displacement	
 		pass		
 	
-	elif actions[Globals.AGENT_ACTIONS.FORWARD]:
+	elif actions & Globals.AGENT_ACTIONS.FORWARD:
 		direction = Vector2(0, -1).rotated(rotation)
-		max_speed = Globals.AGENT_MAX_SPEED_FORWARD		
+		max_speed = Globals.AGENT_MAX_SPEED_FORWARD
 	
-	elif actions[Globals.AGENT_ACTIONS.BACKWARD]:		
+	elif actions & Globals.AGENT_ACTIONS.BACKWARD:		
 		direction = Vector2(0, 1).rotated(rotation)
-		max_speed = Globals.AGENT_MAX_SPEED_BACKWARD	
+		max_speed = Globals.AGENT_MAX_SPEED_BACKWARD
 		
 #
 #	# angular movement
-	if actions[Globals.AGENT_ACTIONS.TURN_RIGHT] and actions[Globals.AGENT_ACTIONS.TURN_LEFT]:
+	if actions & Globals.AGENT_ACTIONS.TURN_RIGHT and actions & Globals.AGENT_ACTIONS.TURN_LEFT:
 		# both right and left turn actions together result in a net-zero turn	
 		pass		
 		
-	elif actions[Globals.AGENT_ACTIONS.TURN_RIGHT]:
+	elif actions & Globals.AGENT_ACTIONS.TURN_RIGHT:
 		turn += 1.0
 		
-	elif actions[Globals.AGENT_ACTIONS.TURN_LEFT]:
+	elif actions & Globals.AGENT_ACTIONS.TURN_LEFT:
 		turn -= 1.0
 
 	# execute forward/backward motion
 	if direction != Vector2.ZERO:
 		update_velocity(direction, delta, max_speed)
-	else:
-		# apply friction
-		velocity = velocity.move_toward(Vector2.ZERO, Globals.AGENT_WALKING_FRICTION * delta)
 
 	# execute body rotation
 	if turn != 0:
 		update_rotation(turn, delta)
-
-	velocity = move_and_slide(velocity)
-	set_velocity(velocity)
 
 func update_velocity(direction, delta, max_speed):
 	velocity = velocity.move_toward(direction * max_speed, Globals.AGENT_WALKING_ACCELERATION * delta)

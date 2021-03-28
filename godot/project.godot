@@ -79,7 +79,7 @@ ui_zoom_out={
 
 [physics]
 
-common/physics_fps=30
+common/physics_fps=20
 
 [rendering]
 

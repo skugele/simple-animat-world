@@ -3,11 +3,13 @@ import numpy as np
 import json
 import gym
 
+from time import sleep
+
 from stable_baselines.common.env_checker import check_env
 
 DEFAULT_TIMEOUT = 5000  # in milliseconds
 
-REPEAT_COUNT = 4
+STEP_REPEAT_COUNT = 10
 
 DIM_OBSERVATIONS = 8
 DIM_ACTIONS = 4
@@ -15,7 +17,6 @@ DIM_ACTIONS = 4
 # Keys for connection dictionary
 CONN_KEY_OBSERVATIONS = 'OBS'
 CONN_KEY_ACTIONS = 'ACTIONS'
-
 
 # TODO: Move this
 def split(m):
@@ -41,8 +42,8 @@ class SimpleAnimatWorld(gym.Env):
     def __init__(self, args=None):
         self._args = args
 
-        self.action_space = gym.spaces.MultiBinary(DIM_ACTIONS)
-        self.observation_space = gym.spaces.Box(low=0.0, high=np.inf, shape=(REPEAT_COUNT * DIM_OBSERVATIONS,))
+        self.action_space = gym.spaces.Discrete(2 ** DIM_ACTIONS - 1)
+        self.observation_space = gym.spaces.Box(low=0.0, high=np.inf, shape=(STEP_REPEAT_COUNT * DIM_OBSERVATIONS,))
 
         # ZeroMQ connection context - shared by all network sockets
         context = zmq.Context()
@@ -54,13 +55,15 @@ class SimpleAnimatWorld(gym.Env):
         }
 
     def step(self, action):
+        print(f'taking step with action {action}', flush=True)
+
         observations = []  # a set of agent observations from Godot
         reward = 0.0  # always 0.0 -> this is determined in agent code
         done = False  # always False -> this is determined in agent code
         info = {}  # metadata about agent's observations
 
         # multiple executions and observations possible per call
-        for i in range(REPEAT_COUNT):
+        for i in range(STEP_REPEAT_COUNT):
             self._send_action_to_godot(action)
             meta, obs = self._receive_observation_from_godot()
 
@@ -69,6 +72,8 @@ class SimpleAnimatWorld(gym.Env):
             info[i] = meta
 
         reward = self._calculate_reward(observations)
+        print(f'reward: {reward}', flush=True)
+
         return np.concatenate(observations, axis=1)[0, :], reward, done, info
 
     def reset(self):
@@ -84,7 +89,7 @@ class SimpleAnimatWorld(gym.Env):
         info = []  # metadata about agent's observations
 
         # multiple executions and observations possible per call
-        for i in range(REPEAT_COUNT):
+        for i in range(STEP_REPEAT_COUNT):
             meta, obs = self._receive_observation_from_godot()
 
             # there will be a set of observations and info if repeat count > 1
@@ -149,7 +154,7 @@ class SimpleAnimatWorld(gym.Env):
 
         connection = self._connections[CONN_KEY_ACTIONS]
 
-        request = {'agent_id': self._args.id, 'actions': action}
+        request = {'id': self._args.id, 'action': int(action)}
         request_encoded = json.dumps(request)
 
         connection.send_string(request_encoded)
@@ -163,22 +168,28 @@ class SimpleAnimatWorld(gym.Env):
 
         # unmarshal JSON message content into a dictionary
         payload = json.loads(payload_enc)
-
         return payload['header'], self._parse_observation(payload['data'])
 
     def _parse_observation(self, data):
-        data_as_list = data['SMELL'] + data['SOMATOSENSORY'] + [data['TOUCH']]
-        array = np.array(data_as_list) / 100.0
-        return array
+        # print(f'data: {data}')
+
+        obs = None
+        try:
+            data_as_list = data['SMELL'] + data['SOMATOSENSORY'] + [data['TOUCH']]
+            obs = np.array(data_as_list) / 100.0
+        except KeyError as e:
+            print(f'exception {e} occurred in observation message {data}')
+
+        return obs
 
     def _calculate_reward(self, obs):
         smell = np.concatenate(obs, axis=0)[:, 0]
         satiety = np.concatenate(obs, axis=0)[:, 6]
         # health = np.concatenate(obs, axis=0)[:, 4]
 
-        satiety_multiplier = 1000
+        satiety_multiplier = 10000
         # health_multiplier = 10
-        smell_multiplier = 10000
+        smell_multiplier = 3000
 
         reward = 0.0
 
@@ -190,5 +201,5 @@ class SimpleAnimatWorld(gym.Env):
         if satiety_delta < 0:
             reward += smell_multiplier * smell_delta
 
-        reward += satiety_multiplier * satiety_delta
+        reward += round(satiety_multiplier * satiety_delta, 4)
         return reward

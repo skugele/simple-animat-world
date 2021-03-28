@@ -33,7 +33,8 @@ onready var server_options = {
 	'protocol':'tcp'
 }
 
-
+# FIXME: Remove this shit
+onready var count = 0
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
@@ -55,20 +56,21 @@ func init_agent_comm():
 	pub_context = agent_comm.connect(pub_options)
 	agent_comm.start_listener(server_options)	
 	
-	
+
 func _process(delta):
-	
 	# check for actions from human-controlled agents
 	if teleop_enabled:
 		process_teleop_action()
-
+	
+func _physics_process(delta):
+	
 	var n_food_to_spawn = Globals.N_RANDOM_FOOD - $Food.get_child_count()
 	if (n_food_to_spawn > 0):
 		spawn(n_food_to_spawn, "res://scenes/Food.tscn", $Food)
 	
-	# publish agents' state
 	for agent in agent_registry.values():
 		publish_sensors_state(agent)
+
 
 func get_sensors_topic(agent):
 	return Globals.SENSORS_STATE_TOPIC_FORMAT.format({'agent_id':agent.id})
@@ -205,15 +207,22 @@ func add_agent_signal_handlers(agent):
 		"_on_agent_consumed_edible")		
 	
 func process_teleop_action():
-	var actions = {}
+	var actions = 0
 	
-	actions[Globals.AGENT_ACTIONS.FORWARD] = true if Input.is_action_pressed("ui_up") else false;
-	actions[Globals.AGENT_ACTIONS.BACKWARD] = true if Input.is_action_pressed("ui_down") else false;
-	actions[Globals.AGENT_ACTIONS.TURN_LEFT] = true if Input.is_action_pressed("ui_left") else false;
-	actions[Globals.AGENT_ACTIONS.TURN_RIGHT] = true if Input.is_action_pressed("ui_right") else false;
-
+	if Input.is_action_pressed("ui_up"):
+		actions |= Globals.AGENT_ACTIONS.FORWARD
+		
+	if Input.is_action_pressed("ui_down"):
+		actions |= Globals.AGENT_ACTIONS.BACKWARD	
+		
+	if Input.is_action_pressed("ui_left"):
+		actions |= Globals.AGENT_ACTIONS.TURN_LEFT
+		
+	if Input.is_action_pressed("ui_right"):
+		actions |= Globals.AGENT_ACTIONS.TURN_RIGHT	
+	
 	var agent = agent_registry[followed_agent_id]
-	if agent:
+	if agent and actions > 0:
 		agent.add_action(actions)
 
 func _on_agent_consumed_edible(agent, edible):
@@ -225,8 +234,14 @@ func _on_agent_consumed_edible(agent, edible):
 	agent.stats.satiety += Globals.SATIETY_PER_UNIT_FOOD
 		
 func _on_remote_action_received(action_details):
-	var id = action_details['agent_id']
-	var actions = action_details['actions']
+#	print('received message: ', action_details)
+	
+	if not (action_details.has('id') and action_details.has('action')):
+		print('malformed message: %s expecting \'id\' and \'actions\'' % action_details)
+		return
+		
+	var id = action_details['id']	
+	var actions = action_details['action']
 	
 	# ignore incoming remote actions for human controlled agent
 	if (teleop_enabled and id == followed_agent_id):
