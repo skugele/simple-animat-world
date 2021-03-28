@@ -18,6 +18,7 @@ DIM_ACTIONS = 4
 CONN_KEY_OBSERVATIONS = 'OBS'
 CONN_KEY_ACTIONS = 'ACTIONS'
 
+
 # TODO: Move this
 def split(m):
     """ Splits message into separate topic and content strings.
@@ -42,6 +43,8 @@ class SimpleAnimatWorld(gym.Env):
     def __init__(self, args=None):
         self._args = args
 
+        self._reset_history()
+
         self.action_space = gym.spaces.Discrete(2 ** DIM_ACTIONS - 1)
         self.observation_space = gym.spaces.Box(low=0.0, high=np.inf, shape=(STEP_REPEAT_COUNT * DIM_OBSERVATIONS,))
 
@@ -55,11 +58,10 @@ class SimpleAnimatWorld(gym.Env):
         }
 
     def step(self, action):
-        print(f'taking step with action {action}', flush=True)
+
+        self._curr_step += 1
 
         observations = []  # a set of agent observations from Godot
-        reward = 0.0  # always 0.0 -> this is determined in agent code
-        done = False  # always False -> this is determined in agent code
         info = {}  # metadata about agent's observations
 
         # multiple executions and observations possible per call
@@ -71,32 +73,33 @@ class SimpleAnimatWorld(gym.Env):
             observations.append([obs])
             info[i] = meta
 
+        # TODO: This should be determined in the agent's code
         reward = self._calculate_reward(observations)
-        print(f'reward: {reward}', flush=True)
+        done = self._check_done()
+
+        if self._args.verbose:
+            print('step: {}, action: {}, reward: {}, done: {}'.format(
+                self._curr_step, action, reward, done), flush=True)
 
         return np.concatenate(observations, axis=1)[0, :], reward, done, info
 
     def reset(self):
         """ respawns the agent within a running Godot environment and returns an initial observation """
 
-        # TODO: Implement this! Current it returns an observation, but does not reset anything!
+        self._reset_history()
+
+        # TODO: Implement this! Currently it returns an observation, but does not reset anything!
         # (1) Depends on respawn functionality in Godot environment and
         # (2) Mechanism to indicate a respawn is needed (perhaps in an action header?)
-
         observations = []  # a set of agent observations from Godot
-        reward = 0.0  # always 0.0 -> this is determined in agent code
-        done = False  # always False -> this is determined in agent code
-        info = []  # metadata about agent's observations
 
         # multiple executions and observations possible per call
         for i in range(STEP_REPEAT_COUNT):
-            meta, obs = self._receive_observation_from_godot()
+            _, obs = self._receive_observation_from_godot()
 
             # there will be a set of observations and info if repeat count > 1
             observations.append([obs])
-            info.append(meta)
 
-        # return np.concatenate(observations, axis=0), reward, done, info
         return np.concatenate(observations, axis=1)[0, :]
 
     def render(self, mode='noop'):
@@ -111,6 +114,16 @@ class SimpleAnimatWorld(gym.Env):
     def verify(self):
         """ perform sanity checks on the environment """
         check_env(self, warn=True)
+
+    def _reset_history(self):
+        self._curr_step = 0
+        self._max_step = self._args.steps_per_episode
+
+    def _check_done(self):
+        if self._max_step == np.inf:
+            return False
+
+        return self._max_step - self._curr_step <= 0
 
     def _establish_action_conn(self, context, args):
         socket = context.socket(zmq.REQ)
@@ -154,7 +167,7 @@ class SimpleAnimatWorld(gym.Env):
 
         connection = self._connections[CONN_KEY_ACTIONS]
 
-        request = {'id': self._args.id, 'action': int(action)}
+        request = {'id': self._args.agent, 'action': int(action)}
         request_encoded = json.dumps(request)
 
         connection.send_string(request_encoded)
