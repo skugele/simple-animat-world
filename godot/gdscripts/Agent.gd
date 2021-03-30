@@ -1,7 +1,7 @@
 extends KinematicBody2D
 
 # a unique identifier for the agent
-onready var id = null
+export onready var id = null
 
 # a list of actions pending execution
 onready var pending_actions = []
@@ -32,7 +32,7 @@ onready var stats = $AgentStats
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	id = 1 # Globals.generate_unique_id()
+	id = Globals.generate_agent_id()
 
 func _process(delta):
 

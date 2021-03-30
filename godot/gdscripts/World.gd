@@ -140,7 +140,7 @@ func spawn(n, scene, parent):
 			[Vector2(rand_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]), 
 					 rand_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))], 
 			parent)	
-	
+			
 func create_random_objects():
 	
 	var n_agents_to_spawn = Globals.N_AGENTS - $Agents.get_child_count()
