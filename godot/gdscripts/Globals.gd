@@ -29,7 +29,7 @@ const RANDOMIZED = true
 
 const N_RANDOM_FOOD = 50
 const N_RANDOM_OBS = 175
-const N_AGENTS = 10
+const N_AGENTS = 2
 
 const WORLD_HORIZ_EXTENT = [0, 9000]
 const WORLD_VERT_EXTENT = [-4100, 4500]

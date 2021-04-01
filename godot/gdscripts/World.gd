@@ -62,7 +62,7 @@ func init_agent_comm():
 
 func _process(delta):
 	# check for actions from human-controlled agents
-	if teleop_enabled:
+	if teleop_enabled and followed_agent:
 		process_teleop_action()
 	
 func _physics_process(delta):

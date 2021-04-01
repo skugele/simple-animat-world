@@ -9,7 +9,6 @@
 [node name="World" type="Node2D"]
 position = Vector2( 0, -1 )
 script = ExtResource( 4 )
-teleop_enabled = true
 
 [node name="Observer" parent="." instance=ExtResource( 2 )]
 position = Vector2( 4603.29, 0 )
