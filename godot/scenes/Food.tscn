@@ -8,8 +8,8 @@
 points = PoolVector2Array( -92.896, -21.437, -21.437, -22.231, 0.364, -88.902, 22.984, -24.215, 91.64, -22.231, 34.89, 23.407, 57.907, 93.65, 1.158, 50.593, -57.179, 92.856, -35.353, 22.217 )
 
 [node name="Food" type="RigidBody2D"]
-collision_layer = 15
-collision_mask = 0
+collision_layer = 4
+collision_mask = 71
 script = ExtResource( 2 )
 
 [node name="Sprite" type="Sprite" parent="."]

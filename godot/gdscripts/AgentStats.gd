@@ -31,17 +31,17 @@ func _ready():
 	
 	poison_consumed = 0.0
 
-func _process(delta):
+#func _process(delta):
 	
 	# satiety decreased
-	set_satiety(satiety - Globals.SATIETY_DECREASE_PER_FRAME * delta)
+#	set_satiety(satiety - Globals.SATIETY_DECREASE_PER_FRAME * delta)
 	
 	# energy increased
 	# set_energy(energy + Globals.ENERGY_INCREASE_PER_FRAME * delta)
 	
 	# if starving
-	if is_starving():
-		set_health(health - Globals.STARVING_DAMAGE_PER_FRAME * delta)
+#	if is_starving():
+#		set_health(health - Globals.STARVING_DAMAGE_PER_FRAME * delta)
 			
 	# if poisoned
 #	if is_poisoned():

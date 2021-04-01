@@ -9,13 +9,24 @@ onready var pending_actions = []
 ###############
 # sensor vars #
 ###############
-onready var active_scents = {} # dictionary of scent emitters ids -> active scent areas
-onready var active_scents_combined = Globals.NULL_SMELL
+onready var antenna_left = $AntennaLeft
+onready var antenna_right = $AntennaRight
+
+onready var active_scents_left = {} # dictionary of scent emitters ids -> active scent areas
+onready var active_scents_right = {} # dictionary of scent emitters ids -> active scent areas
+
+onready var active_scents_left_combined = Globals.NULL_SMELL
+onready var active_scents_right_combined = Globals.NULL_SMELL
+onready var active_scents_combined = []
 
 onready var ignored_scents = [] # ignore own smells
-onready var combined_scent_sig = null
+
+onready var combined_scent_sig_left = null
+onready var combined_scent_sig_right = null
 
 onready var active_tactile_events = 0
+
+onready var has_camera = false
 
 ###########
 # signals #
@@ -34,7 +45,7 @@ onready var stats = $AgentStats
 func _ready():
 	id = Globals.generate_agent_id()
 
-func _process(delta):
+func _physics_process(delta):
 
 	# (1) execute next pending action(s) -- parallel action execution is possible
 	var actions = pending_actions.pop_front()
@@ -48,7 +59,12 @@ func _process(delta):
 	set_velocity(velocity)
 			
 	# (2) update state variables
-	active_scents_combined = get_combined_scent(active_scents)
+	active_scents_left_combined = get_combined_scent($AntennaLeft/Area2D, active_scents_left)
+	active_scents_right_combined = get_combined_scent($AntennaRight/Area2D, active_scents_right)
+
+	active_scents_combined = []	
+	active_scents_combined += active_scents_left_combined
+	active_scents_combined += active_scents_right_combined
 	
 func print_stats():	
 	print('agent %s\'s health: %s' % [id, stats.health])
@@ -117,28 +133,54 @@ func set_rotation(degrees):
 func set_velocity(value):
 	velocity = value
 
-func add_scent(scent):	
+func set_camera(camera):
+	if not has_camera:
+		add_child(camera)
+		has_camera = true
+		
+func unset_camera(camera):
+	if has_camera:
+		remove_child(camera)
+		has_camera = false
+		
+func add_scent(origin, scent):	
 #	print('agent %s smells scent %s with signature %s' % [self, scent, scent.signature])
 	
-	if active_scents.has(scent.smell_emitter_id):
-		active_scents[scent.smell_emitter_id].push_back(scent)
+	if origin.id == antenna_left.id:
+		if active_scents_left.has(scent.smell_emitter_id):
+			active_scents_left[scent.smell_emitter_id].push_back(scent)
+		else:
+			active_scents_left[scent.smell_emitter_id] = [scent]
+	elif origin.id == antenna_right.id:
+		if active_scents_right.has(scent.smell_emitter_id):
+			active_scents_right[scent.smell_emitter_id].push_back(scent)
+		else:
+			active_scents_right[scent.smell_emitter_id] = [scent]	
 	else:
-		active_scents[scent.smell_emitter_id] = [scent]
+		print('origin unknown in add_scent!')
 
-func remove_scent(scent):
+func remove_scent(origin, scent):
 #	print('agent %s lost scent %s with signature %s' % [self, scent, scent.signature])
 	
-	if len(active_scents[scent.smell_emitter_id]) <= 1:
-		active_scents.erase(scent.smell_emitter_id)
+	if origin.id == antenna_left.id:
+		if len(active_scents_left[scent.smell_emitter_id]) <= 1:
+			active_scents_left.erase(scent.smell_emitter_id)
+		else:
+			var removed_scent = active_scents_left[scent.smell_emitter_id].pop_back()	
+	elif origin.id == antenna_right.id:
+		if len(active_scents_right[scent.smell_emitter_id]) <= 1:
+			active_scents_right.erase(scent.smell_emitter_id)
+		else:
+			var removed_scent = active_scents_right[scent.smell_emitter_id].pop_back()		
 	else:
-		var removed_scent = active_scents[scent.smell_emitter_id].pop_back()
+		print('origin unknown in remove_scent!')		
 	
-func distance_from_scent(scent):
+func distance_from_scent(origin, scent):
 	if scent == null:
 		return null
 		
 	var distance = Globals.SMELL_DETECTABLE_RADIUS
-	var detector_pos = $SmellDetector.global_position
+	var detector_pos = origin.global_position
 		
 	if scent.is_inside_tree():
 		var scent_pos = scent.global_position		
@@ -146,13 +188,13 @@ func distance_from_scent(scent):
 	
 	return distance
 	
-func get_combined_scent(active_scents):
+func get_combined_scent(origin, active_scents):
 	var combined_scent_sig = Globals.NULL_SMELL
 
 	for id in active_scents.keys():
 		var scent = active_scents[id][-1]
 		
-		var distance = distance_from_scent(scent)
+		var distance = distance_from_scent(origin, scent)
 		if distance == null:
 			continue
 
@@ -170,11 +212,13 @@ func get_combined_scent(active_scents):
 ###################
 # Signal Handlers #
 ###################
-func _on_smell_detected(scent):
-	add_scent(scent)
+func _on_smell_detected(origin, scent):
+#	print('smell_detected from origin: ', origin)
+	add_scent(origin, scent)
 
-func _on_smell_lost(scent):
-	remove_scent(scent)
+func _on_smell_lost(origin, scent):
+#	print('smell_lost from origin: ', origin)
+	remove_scent(origin, scent)
 
 func _on_edible_consumed(edible):
 	emit_signal("agent_consumed_edible", self, edible)

@@ -2,7 +2,7 @@ extends Node2D
 
 export(bool) var teleop_enabled = false
 
-export(int) var followed_agent_id = null setget set_followed_agent_id
+var followed_agent = null
 
 var agent_registry = {}
 var pending_actions = []
@@ -12,9 +12,9 @@ onready var zoom = DEFAULT_ZOOM
 onready var camera = null
 
 export(float) var MAX_ZOOM_IN = 1
-export(float) var MAX_ZOOM_OUT = 8
+export(float) var MAX_ZOOM_OUT = 16
 export(float) var DEFAULT_ZOOM = 2
-export(float) var ZOOM_DELTA = 0.3
+export(float) var ZOOM_DELTA = 0.4
 
 const ZOOM_IN_DIRECTION = -1
 const ZOOM_OUT_DIRECTION = 1
@@ -33,15 +33,16 @@ onready var server_options = {
 	'protocol':'tcp'
 }
 
-# FIXME: Remove this shit
-onready var count = 0
+onready var initialized = false
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	init_camera()	
+	init_camera()
 	init_agent_comm()
 	
 	create_world()
+	
+	initialized = true
 
 func init_camera():
 	camera = Camera2D.new()
@@ -51,6 +52,8 @@ func init_camera():
 	camera.smoothing_enabled = Globals.CAMERA_SMOOTHING_ENABLED
 	if Globals.CAMERA_SMOOTHING_ENABLED:
 		camera.smoothing_speed = Globals.CAMERA_SMOOTHING_SPEED	
+	
+	$Observer.set_camera(camera)
 	
 func init_agent_comm():
 	pub_context = agent_comm.connect(pub_options)
@@ -81,7 +84,8 @@ func get_sensors_message(agent):
 	# add smell sensor
 	msg[Globals.OLFACTORY_SENSOR_ID] = agent.active_scents_combined
 	msg[Globals.TACTILE_SENSOR_ID] = 1 if agent.active_tactile_events else 0
-	msg[Globals.SOMATO_SENSOR_ID] = agent.stats.as_list()
+#	msg[Globals.SOMATO_SENSOR_ID] = agent.stats.as_list()
+	msg[Globals.SOMATO_SENSOR_ID] = agent.stats.satiety
 	
 	return msg
 	
@@ -170,17 +174,42 @@ func init_objects():
 		add_agent_signal_handlers(agent)
 		agent_registry[agent.id] = agent
 	
-#	if len(agents) > 0:
-	set_followed_agent_id(agents[0].id)
-	
-func set_followed_agent_id(id):
-	if followed_agent_id != null:
-		agent_registry[followed_agent_id].remove_child(camera)
+func follow_next_agent():
+	if not followed_agent:
+		follow_agent(0)
+	else:
+		follow_agent((followed_agent.id + 1) % len(agent_registry))
 
-	if agent_registry.has(id):
-		agent_registry[id].add_child(camera)	
-		followed_agent_id = id
+func follow_prev_agent():
+	if not followed_agent:
+		follow_agent(0)
+	else:
+		follow_agent((followed_agent.id - 1) % len(agent_registry))
+		
+func follow_observer():
+	# remove camera from previously followed agent (if any)
+	if followed_agent:
+		followed_agent.unset_camera(camera)
 	
+	$Observer.set_camera(camera)	
+	
+func follow_agent(id):
+	if followed_agent and id == followed_agent.id:
+		return
+		
+	# remove camera from previously followed agent (if any)
+	if followed_agent:
+		followed_agent.unset_camera(camera)
+
+	# add camera to new followed agent
+	if agent_registry.has(id):
+		followed_agent = agent_registry[id]
+
+		$Observer.unset_camera(camera)
+		followed_agent.set_camera(camera)
+	else:
+		$Observer.set_camera(camera)			
+
 func zoom_in():
 	if camera and zoom - ZOOM_DELTA >= MAX_ZOOM_IN:
 		zoom -= ZOOM_DELTA
@@ -199,6 +228,28 @@ func _input(event):
 		zoom_in()
 	elif event.is_action_pressed("ui_zoom_out"):
 		zoom_out()
+	elif event.is_action_pressed("next_agent"):
+		follow_next_agent()
+	elif event.is_action_pressed("prev_agent"):
+		follow_prev_agent()
+	elif event.is_action_pressed("follow_observer"):
+		follow_observer()
+		
+	# Process observer actions
+	else:
+		
+		if $Observer.has_camera:
+			if Input.is_action_pressed("ui_up"):
+				$Observer.move_up()
+			
+			if Input.is_action_pressed("ui_down"):
+				$Observer.move_down()
+			
+			if Input.is_action_pressed("ui_left"):
+				$Observer.move_left()
+			
+			if Input.is_action_pressed("ui_right"):
+				$Observer.move_right()
 
 func add_agent_signal_handlers(agent):
 	agent.connect(
@@ -206,7 +257,7 @@ func add_agent_signal_handlers(agent):
 		self, 
 		"_on_agent_consumed_edible")		
 	
-func process_teleop_action():
+func process_teleop_action():	
 	var actions = 0
 	
 	if Input.is_action_pressed("ui_up"):
@@ -221,10 +272,9 @@ func process_teleop_action():
 	if Input.is_action_pressed("ui_right"):
 		actions |= Globals.AGENT_ACTIONS.TURN_RIGHT	
 	
-	var agent = agent_registry[followed_agent_id]
-	if agent and actions > 0:
-		agent.add_action(actions)
-
+	if followed_agent and actions > 0:
+		followed_agent.add_action(actions)
+				
 func _on_agent_consumed_edible(agent, edible):
 	print("agent %s consumed edible %s" % [agent.id, edible])
 	
@@ -244,7 +294,7 @@ func _on_remote_action_received(action_details):
 	var actions = action_details['action']
 	
 	# ignore incoming remote actions for human controlled agent
-	if (teleop_enabled and id == followed_agent_id):
+	if (teleop_enabled and id == followed_agent.id):
 		return
 		
 	var agent = agent_registry[id]

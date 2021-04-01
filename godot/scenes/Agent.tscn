@@ -14,7 +14,7 @@ radius = 102.226
 
 [node name="Agent" type="KinematicBody2D"]
 collision_layer = 2
-collision_mask = 7
+collision_mask = 71
 script = ExtResource( 2 )
 
 [node name="AgentStats" parent="." instance=ExtResource( 4 )]
@@ -29,11 +29,16 @@ region_rect = Rect2( 0, 0, 201, 201 )
 shape = SubResource( 1 )
 
 [node name="Mouth" parent="." instance=ExtResource( 3 )]
-modulate = Color( 0, 0.368627, 1, 1 )
+modulate = Color( 1, 0, 0, 1 )
 position = Vector2( 0, -99 )
 
-[node name="SmellDetector" parent="." instance=ExtResource( 5 )]
-position = Vector2( 0, -153 )
+[node name="AntennaLeft" parent="." instance=ExtResource( 5 )]
+position = Vector2( -33, -140 )
+rotation = -0.523599
+
+[node name="AntennaRight" parent="." instance=ExtResource( 5 )]
+position = Vector2( 33, -140 )
+rotation = 0.523599
 
 [node name="TactileSensor" type="Area2D" parent="."]
 
@@ -41,7 +46,9 @@ position = Vector2( 0, -153 )
 shape = SubResource( 2 )
 [connection signal="agent_dead" from="AgentStats" to="." method="_on_death"]
 [connection signal="edible_consumed" from="Mouth" to="." method="_on_edible_consumed"]
-[connection signal="smell_detected" from="SmellDetector" to="." method="_on_smell_detected"]
-[connection signal="smell_lost" from="SmellDetector" to="." method="_on_smell_lost"]
+[connection signal="smell_detected" from="AntennaLeft" to="." method="_on_smell_detected"]
+[connection signal="smell_lost" from="AntennaLeft" to="." method="_on_smell_lost"]
+[connection signal="smell_detected" from="AntennaRight" to="." method="_on_smell_detected"]
+[connection signal="smell_lost" from="AntennaRight" to="." method="_on_smell_lost"]
 [connection signal="body_entered" from="TactileSensor" to="." method="_on_tactile_event"]
 [connection signal="body_exited" from="TactileSensor" to="." method="_on_tactile_event_ends"]

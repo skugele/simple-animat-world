@@ -27,9 +27,9 @@ const CAMERA_SMOOTHING_SPEED = 2
 ###############################
 const RANDOMIZED = true
 
-const N_RANDOM_FOOD = 30
+const N_RANDOM_FOOD = 50
 const N_RANDOM_OBS = 175
-const N_AGENTS = 1
+const N_AGENTS = 10
 
 const WORLD_HORIZ_EXTENT = [0, 9000]
 const WORLD_VERT_EXTENT = [-4100, 4500]
@@ -39,11 +39,11 @@ const WORLD_VERT_EXTENT = [-4100, 4500]
 ###################
 const AGENT_INITIAL_HEALTH = 100
 const AGENT_INITIAL_ENERGY = 50
-const AGENT_INITIAL_SATIETY = 9000
+const AGENT_INITIAL_SATIETY = 0
 
 const AGENT_MAX_HEALTH = 100
 const AGENT_MAX_ENERGY = 100
-const AGENT_MAX_SATIETY = 10000
+const AGENT_MAX_SATIETY = 100000
 
 # Time-based agent stats changes
 const SATIETY_DECREASE_PER_FRAME = 0.1
@@ -82,9 +82,9 @@ enum AGENT_ACTIONS {
 	TURN_RIGHT=8
 }
 
-const MAX_PENDING_ACTIONS = 4
+const MAX_PENDING_ACTIONS = 5
 
-const SMELL_DIMENSIONS = 4
+const SMELL_DIMENSIONS = 1
 const SMELL_DETECTABLE_RADIUS = 1000.0
 const SMELL_DISTANCE_MULTIPLIER = 5.0
 const SMELL_DISTANCE_EXPONENT = 3.0
@@ -101,8 +101,8 @@ var SOMATO_SENSOR_ID = 'SOMATOSENSORY'
 ##############################################
 # modifiable global state (USE WITH CAUTION) #
 ##############################################
-var global_id = 0 # should never be acessed directly (use generate_unique_id)
-var agent_id = 0 # should never be acessed directly (use generate_unique_id)
+var global_id = -1 # should never be acessed directly (use generate_unique_id)
+var agent_id = -1 # should never be acessed directly (use generate_unique_id)
 
 # thread locks (mutexes)
 var global_id_mutex = Mutex.new() # used in generate_unique_id function

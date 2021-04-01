@@ -2,11 +2,13 @@
 
 extends Node2D
 
-signal smell_detected(scent)
-signal smell_lost(scent)
+signal smell_detected(origin, scent)
+signal smell_lost(origin, scent)
+
+onready var id = null
 
 func _ready():
-	pass # Replace with function body.
+	id = Globals.generate_unique_id()
 	
 func enable():
 	$Area2D/CollisionShape2D.disabled = false
@@ -16,8 +18,8 @@ func disable():
 
 func _on_area_entered(scent):
 #	print('entered: ', scent)
-	emit_signal("smell_detected", scent)
+	emit_signal("smell_detected", self, scent)
 
 func _on_area_exited(scent):
 #	print('exited: ', scent)
-	emit_signal("smell_lost", scent)
+	emit_signal("smell_lost", self, scent)
