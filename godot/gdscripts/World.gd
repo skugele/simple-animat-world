@@ -1,8 +1,8 @@
 extends Node2D
 
-export(bool) var teleop_enabled = false
+onready var teleop_enabled = false
 
-var followed_agent = null
+onready var followed_agent = null
 
 var agent_registry = {}
 var pending_actions = []
@@ -13,7 +13,7 @@ onready var camera = null
 
 export(float) var MAX_ZOOM_IN = 1
 export(float) var MAX_ZOOM_OUT = 16
-export(float) var DEFAULT_ZOOM = 2
+export(float) var DEFAULT_ZOOM = 12
 export(float) var ZOOM_DELTA = 0.4
 
 const ZOOM_IN_DIRECTION = -1
@@ -86,6 +86,8 @@ func get_sensors_message(agent):
 	msg[Globals.TACTILE_SENSOR_ID] = 1 if agent.active_tactile_events else 0
 #	msg[Globals.SOMATO_SENSOR_ID] = agent.stats.as_list()
 	msg[Globals.SOMATO_SENSOR_ID] = agent.stats.satiety
+	msg[Globals.VELOCITY_ID] = [agent.velocity.x, agent.velocity.y]
+	msg[Globals.LAST_ACTION_SEQNO_ID] = agent.last_action_seqno
 	
 	return msg
 	
@@ -234,6 +236,8 @@ func _input(event):
 		follow_prev_agent()
 	elif event.is_action_pressed("follow_observer"):
 		follow_observer()
+	elif event.is_action_pressed("toggle_teleop"):
+		teleop_enabled = not teleop_enabled
 		
 	# Process observer actions
 	else:
@@ -273,7 +277,7 @@ func process_teleop_action():
 		actions |= Globals.AGENT_ACTIONS.TURN_RIGHT	
 	
 	if followed_agent and actions > 0:
-		followed_agent.add_action(actions)
+		followed_agent.add_action(-1, actions)
 				
 func _on_agent_consumed_edible(agent, edible):
 	print("agent %s consumed edible %s" % [agent.id, edible])
@@ -285,13 +289,26 @@ func _on_agent_consumed_edible(agent, edible):
 		
 func _on_remote_action_received(action_details):
 #	print('received message: ', action_details)
-	
-	if not (action_details.has('id') and action_details.has('action')):
-		print('malformed message: %s expecting \'id\' and \'actions\'' % action_details)
+
+	if not (action_details.has('header') and action_details.has('data')):
+		print('malformed message%s : expecting \'header\' and \'data\'' % action_details)
 		return
-		
-	var id = action_details['id']	
-	var actions = action_details['action']
+
+	var header = action_details['header']	
+	var data = action_details['data']
+
+	if not (header.has('seqno') and header.has('id')):
+		print('malformed message header %s : expecting \'seqno\' and \'id\'' % header)
+		return	
+	
+	var id = header['id']	
+	var seqno = header['seqno']
+	
+	if not data.has('action'):
+		print('malformed message data %s : expecting \'action\'' % data)
+		return	
+	
+	var actions = data['action']
 	
 	# ignore incoming remote actions for human controlled agent
 	if (teleop_enabled and id == followed_agent.id):
@@ -299,4 +316,5 @@ func _on_remote_action_received(action_details):
 		
 	var agent = agent_registry[id]
 	if agent:
-		agent.add_action(actions)
+#		print('adding action: ', actions)
+		agent.add_action(seqno, actions)
