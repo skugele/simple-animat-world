@@ -4,14 +4,17 @@ import os
 from time import time, gmtime, strftime
 from pathlib import Path
 
+import tensorflow as tf
 import numpy as np
 import gym
 
 from stable_baselines.common.evaluation import evaluate_policy
-from stable_baselines.common.policies import MlpPolicy
+from stable_baselines.common.policies import MlpPolicy, MlpLstmPolicy
+from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines.deepq.policies import MlpPolicy as DqnMlpPolicy
-from stable_baselines import DQN  # , A2C, PPO2, SAC, ACER
-from stable_baselines.common import make_vec_env
+from stable_baselines.deepq.policies import LnMlpPolicy as DpqLnMlpPolicy
+from stable_baselines import DQN, A2C, PPO2, SAC, ACER
+from stable_baselines.common import set_global_seeds
 
 DEFAULT_ACTION_PORT = 5678
 DEFAULT_OBSERVATION_PORT = 9001
@@ -20,7 +23,10 @@ BASE_MODEL_PATH = Path('save/stable-baselines')
 DEFAULT_MODEL_FILE = Path('model.zip')
 
 algorithm_params = {
-    'DQN': {'impl': DQN, 'policy': DqnMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'dqn'}
+    'DQN': {'impl': DQN, 'policy': DqnMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'dqn'},
+    'PPO2': {'impl': PPO2, 'policy': MlpLstmPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2'},
+    'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c'},
+    'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer'}
 }
 
 
@@ -47,7 +53,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='A driver script for a Godot agent')
 
     # TODO: I may need to rethink all of these with respect to vectorized environments.
-    parser.add_argument('--agent', metavar='ID', type=int, required=True, help='the agent\'s identifier')
+    parser.add_argument('--n_agents', metavar='N', type=int, required=False, default=1,
+                        help='the number of training agents to spawn')
     parser.add_argument('--action_port', metavar='PORT', type=int, required=False, default=DEFAULT_ACTION_PORT,
                         help='the port number of the Godot action listener')
     parser.add_argument('--obs_port', metavar='PORT', type=int, required=False, default=DEFAULT_OBSERVATION_PORT,
@@ -58,8 +65,8 @@ def parse_args():
     # algorithm parameters
     parser.add_argument('--algorithm', metavar='ID', type=str.upper, required=False, default='DQN',
                         help=f'the algorithm to execute. available algorithms: {",".join(algorithm_params.keys())}')
-    parser.add_argument('--steps', metavar='N', type=int, required=False, default=500,
-                        help='the number of environment steps to execute')  
+    parser.add_argument('--steps', metavar='N', type=int, required=False, default=10000,
+                        help='the number of environment steps to execute')
     parser.add_argument('--steps_per_episode', metavar='N', type=int, required=False, default=np.inf,
                         help='the number of steps per episode')
 
@@ -115,18 +122,51 @@ def init_model(params, env, args):
     """
     algorithm, policy, saved_model = params['impl'], params['policy'], get_model_filepath(params, args)
 
+    # Custom MLP policy of two layers of size 32 each with tanh activation function
+    # policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=[8, 8])
+
     return algorithm.load(saved_model.absolute(), env=env) \
         if saved_model.exists() \
-        else algorithm(policy, env, verbose=args.verbose)
+        else algorithm(policy, env,
+                       # TODO: Move these into algorithm_params (different algos allow different args)
+                       # exploration_fraction=0.8,
+                       # exploration_final_eps=0.02,
+                       # buffer_size=1000,
+                       # learning_starts=200,
+                       # target_network_update_freq=100,
+                       # policy_kwargs=policy_kwargs,
+                       verbose=args.verbose)
 
 
-def verify_env(env, args):
+def make_godot_env(env_id, agent_id, args, seed=0):
+    """
+    Utility function for multiprocessed env.
+
+    :param env_id: (str) the environment ID
+    :param agent_id: the agent identifier in Godot environment
+    :param num_env: (int) the number of environments you wish to have in subprocesses
+    :param args: command-line arguments (i.e., an argparse parser)
+    :param seed: (int) the inital seed for RNG
+    """
+
+    def _init():
+        env = gym.make(env_id, agent_id=agent_id, args=args)
+        env.seed(seed + agent_id)
+        return env
+
+    set_global_seeds(seed)
+    return _init
+
+
+def verify_env(args):
     """ Verifies that the environment conforms to OpenAI gym and stable-baseline standards.
 
-    :param env: an OpenAI gym environment
     :param args: an argparse parser object containing command-line argument values
     :return: None
     """
+
+    # verify does not work with vectorized environments, so this has to be created separately
+    env = gym.make('gym_godot:simple-animat-v0', agent_id=1, args=args)
     env.verify()
 
 
@@ -163,11 +203,6 @@ def learn(model, params, args):
     :param args: command-line arguments (i.e., an argparse parser)
     :return: None
     """
-    saved_model = get_model_filepath(params, args)
-
-    # preliminary save to catch file access issues
-    model.save(saved_model)
-
     # begin training
     start = time()
     model.learn(total_timesteps=args.steps)
@@ -176,7 +211,7 @@ def learn(model, params, args):
     print(f'elapsed time: {strftime("%H:%M:%S", gmtime(end - start))}')
 
     # save training results
-    model.save(saved_model)
+    model.save(get_model_filepath(params, args))
 
 
 def evaluate(model, env, args):
@@ -188,27 +223,31 @@ def evaluate(model, env, args):
     :return: tuple containing the mean and std. deviation of the agent's acquired rewards
     """
 
-    # the enviroment is not episodic, so we have to artificially add a maximum number of steps for eval
-    env._max_episode_steps = args.steps
-
     mean, std_dev = evaluate_policy(model, env, n_eval_episodes=5)
     print(f'Policy evaluation results: mean (reward) = {mean}; std dev (reward) = {std_dev}')
     return mean, std_dev
 
 
 def run(model, env, args):
-    pass
+    obs = env.reset()
+
+    done = [False for _ in range(env.num_envs)]
+    while not all(done):
+        action, _ = model.predict(obs)
+        obs, rewards, done, info = env.step(action)
+        print(f'done: {done}')
 
 
 def main():
     args = parse_args()
 
     # TODO: Convert to a vectorized environment
-    env = gym.make('gym_godot:simple-animat-v0', args=args)
+
 
     if args.verify:
-        verify_env(env, args)
+        verify_env(args)
 
+    env = DummyVecEnv([make_godot_env('gym_godot:simple-animat-v0', i, args, seed=i) for i in range(args.n_agents)])
     params = algorithm_params[args.algorithm]
 
     if args.purge:
@@ -219,8 +258,10 @@ def main():
     if args.learn:
         learn(model, params, args)
 
-    if args.evaluate:
-        evaluate(model, env, args)
+    # if args.evaluate:
+    #     env = DummyVecEnv([make_godot_env('gym_godot:simple-animat-v0', i, args) for i in range(1)])
+    #     model = init_model(params, env, args)
+    #     evaluate(model, env, args)
 
     if args.run:
         run(model, env, args)
