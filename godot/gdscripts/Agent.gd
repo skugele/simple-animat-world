@@ -28,6 +28,11 @@ onready var active_tactile_events = 0
 
 onready var has_camera = false
 
+onready var last_action_seqno = -1
+
+onready var pending_actions_mutex = Mutex.new()
+onready var pending_actions_semaphore = Semaphore.new()
+
 ###########
 # signals #
 ###########
@@ -37,6 +42,10 @@ signal agent_consumed_edible(agent, edible)
 onready var velocity = Vector2.ZERO setget set_velocity
 onready var stats = $AgentStats
 
+onready var action_thread = null
+
+onready var agent_alive = true
+
 ###############################
 # built-in function overrides #
 ###############################
@@ -44,20 +53,37 @@ onready var stats = $AgentStats
 # Called when the node enters the scene tree for the first time.
 func _ready():
 	id = Globals.generate_agent_id()
+	
+#	action_thread = Thread.new()
+#	action_thread.start(self, "_process_actions")
 
-func _physics_process(delta):
-
-	# (1) execute next pending action(s) -- parallel action execution is possible
-	var actions = pending_actions.pop_front()
-	if actions:
-		execute(actions, delta)
-	else:
-		# apply friction
-		velocity = velocity.move_toward(Vector2.ZERO, Globals.AGENT_WALKING_FRICTION * delta)
+func _process_actions(delta):
+	var pending_action = pending_actions.pop_front()
+	if pending_action != null:
+		execute(pending_action['action'], delta)
 		
-	velocity = move_and_slide(velocity)
-	set_velocity(velocity)
-			
+		velocity = move_and_slide(velocity)
+		
+		last_action_seqno = pending_action['seqno']
+	else:
+		# process friction
+		velocity = velocity.move_toward(Vector2.ZERO, Globals.AGENT_WALKING_FRICTION * delta)		
+
+func _exit_tree():
+	pass
+	# safely clean-up action thread
+#	agent_alive = false
+#	pending_actions_semaphore.post()
+#	action_thread.wait_to_finish()
+	
+				
+func _process(delta):
+
+	_process_actions(delta)
+	
+	if velocity != Vector2.ZERO:
+		velocity = move_and_slide(velocity)
+		
 	# (2) update state variables
 	active_scents_left_combined = get_combined_scent($AntennaLeft/Area2D, active_scents_left)
 	active_scents_right_combined = get_combined_scent($AntennaRight/Area2D, active_scents_right)
@@ -70,17 +96,27 @@ func print_stats():
 	print('agent %s\'s health: %s' % [id, stats.health])
 	print('agent %s\'s satiety: %s' % [id, stats.satiety])
 		
-func add_action(action):
+func add_action(seqno, action):
+	if seqno != -1 and seqno <= last_action_seqno:
+		return
+	
+#	pending_actions_mutex.lock()
 	if len(pending_actions) > Globals.MAX_PENDING_ACTIONS:
-		pending_actions.pop_front()
-		print('Max queue depth reached. Dropping oldest pending action.')
+		var dropped_actions = pending_actions.pop_front()
+		print('Max queue depth reached. Dropping oldest pending action with value %s.' % dropped_actions)
 		
-	pending_actions.push_back(action)
+	pending_actions.push_back({'seqno': seqno, 'action': action})
+#	pending_actions_mutex.unlock()
+#	pending_actions_semaphore.post()
 
 # actions are encodings of parallel actions as integers in the range [0, 2^(N_ACTIONS) - 1). bitwise operations
 # are used to determine the actions to execute. For example, the integer 13d = 1101b indicates that actions 1, 3, and 4
 # are to be executed in parallel.
-func execute(actions, delta):
+func execute(action, delta):	
+	
+	if action == Globals.NOOP_ACTION:
+		return
+		
 #	print('executing actions: ', actions)
 	var turn = 0
 	var direction = Vector2.ZERO
@@ -89,38 +125,40 @@ func execute(actions, delta):
 	var max_speed = 0
 
 	# linear motion	
-	if actions & Globals.AGENT_ACTIONS.BACKWARD and actions & Globals.AGENT_ACTIONS.FORWARD:
+	if action & Globals.AGENT_ACTIONS.BACKWARD and action & Globals.AGENT_ACTIONS.FORWARD:
 		# both forward and backward actions together result in a net-zero linear displacement	
 		pass		
 	
-	elif actions & Globals.AGENT_ACTIONS.FORWARD:
+	elif action & Globals.AGENT_ACTIONS.FORWARD:
 		direction = Vector2(0, -1).rotated(rotation)
 		max_speed = Globals.AGENT_MAX_SPEED_FORWARD
 	
-	elif actions & Globals.AGENT_ACTIONS.BACKWARD:		
+	elif action & Globals.AGENT_ACTIONS.BACKWARD:		
 		direction = Vector2(0, 1).rotated(rotation)
 		max_speed = Globals.AGENT_MAX_SPEED_BACKWARD
 		
 #
 #	# angular movement
-	if actions & Globals.AGENT_ACTIONS.TURN_RIGHT and actions & Globals.AGENT_ACTIONS.TURN_LEFT:
+	if action & Globals.AGENT_ACTIONS.TURN_RIGHT and action & Globals.AGENT_ACTIONS.TURN_LEFT:
 		# both right and left turn actions together result in a net-zero turn	
 		pass		
 		
-	elif actions & Globals.AGENT_ACTIONS.TURN_RIGHT:
+	elif action & Globals.AGENT_ACTIONS.TURN_RIGHT:
 		turn += 1.0
 		
-	elif actions & Globals.AGENT_ACTIONS.TURN_LEFT:
+	elif action & Globals.AGENT_ACTIONS.TURN_LEFT:
 		turn -= 1.0
 
 	# execute forward/backward motion
 	if direction != Vector2.ZERO:
 		update_velocity(direction, delta, max_speed)
+	else:
+		update_velocity(Vector2.ZERO, delta, Globals.AGENT_WALKING_FRICTION)		
 
 	# execute body rotation
 	if turn != 0:
 		update_rotation(turn, delta)
-
+		
 func update_velocity(direction, delta, max_speed):
 	velocity = velocity.move_toward(direction * max_speed, Globals.AGENT_WALKING_ACCELERATION * delta)
 	
@@ -230,7 +268,6 @@ func _on_tactile_event(body):
 func _on_tactile_event_ends(body):
 	if body != self:
 		active_tactile_events -= 1
-
-
+		
 func _on_death():
 	print("Agent {} is dead!".format(id))

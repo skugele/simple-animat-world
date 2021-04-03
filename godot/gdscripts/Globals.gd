@@ -2,7 +2,7 @@
 
 extends Node
 
-var RNG_SEED = 2
+var RNG_SEED = OS.get_ticks_msec()
 var RNG = RandomNumberGenerator.new()
 
 #############
@@ -27,9 +27,9 @@ const CAMERA_SMOOTHING_SPEED = 2
 ###############################
 const RANDOMIZED = true
 
-const N_RANDOM_FOOD = 50
+const N_RANDOM_FOOD = 25
 const N_RANDOM_OBS = 175
-const N_AGENTS = 2
+const N_AGENTS = 4
 
 const WORLD_HORIZ_EXTENT = [0, 9000]
 const WORLD_VERT_EXTENT = [-4100, 4500]
@@ -39,14 +39,14 @@ const WORLD_VERT_EXTENT = [-4100, 4500]
 ###################
 const AGENT_INITIAL_HEALTH = 100
 const AGENT_INITIAL_ENERGY = 50
-const AGENT_INITIAL_SATIETY = 0
+const AGENT_INITIAL_SATIETY = 1000
 
 const AGENT_MAX_HEALTH = 100
 const AGENT_MAX_ENERGY = 100
 const AGENT_MAX_SATIETY = 100000
 
 # Time-based agent stats changes
-const SATIETY_DECREASE_PER_FRAME = 0.1
+const SATIETY_DECREASE_PER_FRAME = 1.0
 const ENERGY_INCREASE_PER_FRAME = 0.75
 const POISON_DECREASE_PER_FRAME = 0.01
 const HEALTH_INCREASE_PER_FRAME = 0.1
@@ -68,9 +68,9 @@ const AGENT_MAX_SPEED_FORWARD = 500
 const AGENT_MAX_SPEED_BACKWARD = 500
 
 const AGENT_WALKING_ACCELERATION = 20000
-const AGENT_WALKING_FRICTION = 20000
+const AGENT_WALKING_FRICTION = 2000
 
-const AGENT_MAX_ROTATION_RATE = 2.0
+const AGENT_MAX_ROTATION_RATE = 5.0
 
 ##########################
 # agent action constants #
@@ -82,10 +82,11 @@ enum AGENT_ACTIONS {
 	TURN_RIGHT=8
 }
 
-const MAX_PENDING_ACTIONS = 5
+const NOOP_ACTION = 0
+const MAX_PENDING_ACTIONS = 1
 
 const SMELL_DIMENSIONS = 1
-const SMELL_DETECTABLE_RADIUS = 1000.0
+const SMELL_DETECTABLE_RADIUS = 2000.0
 const SMELL_DISTANCE_MULTIPLIER = 5.0
 const SMELL_DISTANCE_EXPONENT = 3.0
 
@@ -94,9 +95,12 @@ var NULL_SMELL = get_sensory_vector([])
 
 var SENSORS_STATE_TOPIC_FORMAT = '/agents/{agent_id}/sensors'
 
+# identifiers for dictionary keys in outgoing observation messages
 var OLFACTORY_SENSOR_ID = 'SMELL'
 var TACTILE_SENSOR_ID = 'TOUCH'
 var SOMATO_SENSOR_ID = 'SOMATOSENSORY'
+var VELOCITY_ID = 'VELOCITY'
+var LAST_ACTION_SEQNO_ID = 'LAST_ACTION'
 
 ##############################################
 # modifiable global state (USE WITH CAUTION) #
