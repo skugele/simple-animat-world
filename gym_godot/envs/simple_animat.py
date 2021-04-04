@@ -99,9 +99,9 @@ class SimpleAnimatWorld(gym.Env):
         # FIXME: remove this
         obs = obs[:2]
 
-        if self._args.verbose:
-            print('agent: {}, step: {}, action: {}, reward: {}, obs: {}'.format(
-                self._agent_id, self._curr_step, action, reward, obs), flush=True)
+        # if self._args.verbose:
+        #     print('agent: {}, step: {}, action: {}, reward: {}, obs: {}'.format(
+        #         self._agent_id, self._curr_step, action, reward, obs), flush=True)
 
         return obs, reward, done, info
 

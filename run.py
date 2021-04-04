@@ -1,6 +1,7 @@
 import argparse
 import sys
 import os
+import re
 from time import time, gmtime, strftime
 from pathlib import Path
 
@@ -16,17 +17,30 @@ from stable_baselines.deepq.policies import LnMlpPolicy as DpqLnMlpPolicy
 from stable_baselines import DQN, A2C, PPO2, SAC, ACER
 from stable_baselines.common import set_global_seeds
 
+# from stable_baselines import results_plotter
+from stable_baselines.bench import Monitor
+# from stable_baselines.results_plotter import load_results, ts2xy
+# from stable_baselines.common.noise import AdaptiveParamNoiseSpec
+# from stable_baselines.common.callbacks import BaseCallback
+
+from stable_baselines.common.callbacks import CheckpointCallback, CallbackList, EveryNTimesteps
+
+from eval import NonEpisodicEnvMonitor
+
 DEFAULT_ACTION_PORT = 5678
 DEFAULT_OBSERVATION_PORT = 9001
 
+RUNTIME_PATH = Path('tmp/')
 BASE_MODEL_PATH = Path('save/stable-baselines')
 DEFAULT_MODEL_FILE = Path('model.zip')
 
+SAVE_FREQUENCY = 1000  # save freq. in training steps. note: for vectorized envs this will be n_envs * n_steps_per_env
+
 algorithm_params = {
-    'DQN': {'impl': DQN, 'policy': DqnMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'dqn'},
-    'PPO2': {'impl': PPO2, 'policy': MlpLstmPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2'},
-    'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c'},
-    'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer'}
+    'DQN': {'impl': DQN, 'policy': DqnMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'dqn', 'hyper_params': {}},
+    'PPO2': {'impl': PPO2, 'policy': MlpLstmPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2', 'hyper_params': {}},
+    'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c', 'hyper_params': {}},
+    'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer', 'hyper_params': {}}
 }
 
 
@@ -52,9 +66,10 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description='A driver script for a Godot agent')
 
-    # TODO: I may need to rethink all of these with respect to vectorized environments.
     parser.add_argument('--n_agents', metavar='N', type=int, required=False, default=1,
                         help='the number of training agents to spawn')
+
+    # TODO: I may need to rethink all of these with respect to vectorized environments.
     parser.add_argument('--action_port', metavar='PORT', type=int, required=False, default=DEFAULT_ACTION_PORT,
                         help='the port number of the Godot action listener')
     parser.add_argument('--obs_port', metavar='PORT', type=int, required=False, default=DEFAULT_OBSERVATION_PORT,
@@ -89,6 +104,8 @@ def parse_args():
     # other
     parser.add_argument('--verbose', required=False, action="store_true",
                         help='increases verbosity')
+    parser.add_argument('--session_id', metavar='ID', type=str, required=False,
+                        help='a session id to use (existing or new)', default=None)
 
     args = parser.parse_args()
 
@@ -111,9 +128,29 @@ def get_model_filepath(params, args):
     return params['save_dir'] / args.model
 
 
-def init_model(params, env, args):
+def get_stats_filepath(session_path, agent_id):
+    """ Gets the filepath to the run statistics file. """
+
+    stats_dir = session_path / 'monitor'
+    if not stats_dir.exists():
+        stats_dir.mkdir()
+
+    # TODO: if the filename ends in ".gz" then numpy will automatically use compression.
+    return stats_dir / f'agent_{agent_id}.csv'
+
+
+def get_tensorboard_path(session_path):
+    tf_dir = session_path / 'tensorboard'
+    if not tf_dir.exists():
+        tf_dir.mkdir()
+
+    return tf_dir
+
+
+def init_model(session_path, params, env, args):
     """ Initialize a stable-baselines model.
 
+    :param session_path: (str) the session ID
     :param params: algorithm parameters for a supported stable-baselines algorithm.
     :param env: an OpenAI gym environment
     :param args: command-line arguments (i.e., an argparse parser)
@@ -125,32 +162,27 @@ def init_model(params, env, args):
     # Custom MLP policy of two layers of size 32 each with tanh activation function
     # policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=[8, 8])
 
-    return algorithm.load(saved_model.absolute(), env=env) \
+    return algorithm.load(saved_model.absolute(), env=env, tensorboard_log=get_tensorboard_path(session_path)) \
         if saved_model.exists() \
-        else algorithm(policy, env,
-                       # TODO: Move these into algorithm_params (different algos allow different args)
-                       # exploration_fraction=0.8,
-                       # exploration_final_eps=0.02,
-                       # buffer_size=1000,
-                       # learning_starts=200,
-                       # target_network_update_freq=100,
-                       # policy_kwargs=policy_kwargs,
-                       verbose=args.verbose)
+        else algorithm(policy, env, **params['hyper_params'], verbose=args.verbose,
+                       tensorboard_log=get_tensorboard_path(session_path))
 
 
-def make_godot_env(env_id, agent_id, args, seed=0):
+def make_godot_env(session_path, env_id, agent_id, args, seed=0):
     """
     Utility function for multiprocessed env.
 
+    :param session_path: (str) the session ID
     :param env_id: (str) the environment ID
     :param agent_id: the agent identifier in Godot environment
     :param num_env: (int) the number of environments you wish to have in subprocesses
     :param args: command-line arguments (i.e., an argparse parser)
-    :param seed: (int) the inital seed for RNG
+    :param seed: (int) the initial seed for RNG
     """
 
     def _init():
         env = gym.make(env_id, agent_id=agent_id, args=args)
+        env = NonEpisodicEnvMonitor(env, filename=get_stats_filepath(session_path, agent_id), freq=100)
         env.seed(seed + agent_id)
         return env
 
@@ -158,15 +190,16 @@ def make_godot_env(env_id, agent_id, args, seed=0):
     return _init
 
 
-def verify_env(args):
+def verify_env(env_id, args):
     """ Verifies that the environment conforms to OpenAI gym and stable-baseline standards.
 
+    :param env_id: (str) the environment ID
     :param args: an argparse parser object containing command-line argument values
     :return: None
     """
 
     # verify does not work with vectorized environments, so this has to be created separately
-    env = gym.make('gym_godot:simple-animat-v0', agent_id=1, args=args)
+    env = gym.make(env_id, agent_id=1, args=args)
     env.verify()
 
 
@@ -179,18 +212,19 @@ def purge_model(params, args):
     """
     saved_model = get_model_filepath(params, args)
 
-    user_input = input(f'purge previous saved model {saved_model} (yes | no)?')
+    if saved_model.exists():
+        user_input = input(f'purge previous saved model {saved_model} (yes | no)?')
 
-    if user_input.lower() in ['yes', 'y']:
-        print(f'purge requested. removing previously saved model {saved_model}')
-        try:
-            saved_model.unlink()
-        except FileNotFoundError as e:
-            print(f'Error: file not found {saved_model}!')
+        if user_input.lower() in ['yes', 'y']:
+            print(f'purge requested. removing previously saved model {saved_model}')
+            try:
+                saved_model.unlink()
+            except FileNotFoundError as e:
+                print(f'Error: file not found {saved_model}!')
+                exit(1)
+        else:
+            print('aborting!')
             exit(1)
-    else:
-        print('aborting!')
-        exit(1)
 
 
 def learn(model, params, args):
@@ -203,9 +237,12 @@ def learn(model, params, args):
     :param args: command-line arguments (i.e., an argparse parser)
     :return: None
     """
+    # add callbacks
+    cp_callback = CheckpointCallback(save_freq=1000, save_path=params['save_dir'], name_prefix='model')
+
     # begin training
     start = time()
-    model.learn(total_timesteps=args.steps)
+    model.learn(total_timesteps=args.steps, callback=cp_callback)
     end = time()
 
     print(f'elapsed time: {strftime("%H:%M:%S", gmtime(end - start))}')
@@ -233,35 +270,57 @@ def run(model, env, args):
 
     done = [False for _ in range(env.num_envs)]
     while not all(done):
-        action, _ = model.predict(obs)
+        action, _ = model.predict(obs, deterministic=True)
         obs, rewards, done, info = env.step(action)
         print(f'done: {done}')
 
 
-def main():
+def sanitize(string):
+    """ Cleanses a string so it is safe to use in a file path """
+    return re.sub(r'[:/\\<>|?*\'\"]', '_', string)
+
+
+def create_session_id(env_id, params, args):
+    return sanitize(f'{env_id}_{args.algorithm}_{int(time())}')
+
+
+def init_session(env_id, params, args):
+    session_id = sanitize(args.session_id) if args.session_id else create_session_id(env_id, params, args)
+    session_path = RUNTIME_PATH / session_id
+    if not session_path.exists():
+        session_path.mkdir()
+
+    return session_id, session_path
+
+
+def main(env_id):
     args = parse_args()
-
-    # TODO: Convert to a vectorized environment
-
-
-    if args.verify:
-        verify_env(args)
-
-    env = DummyVecEnv([make_godot_env('gym_godot:simple-animat-v0', i, args, seed=i) for i in range(args.n_agents)])
     params = algorithm_params[args.algorithm]
 
+    if args.verify:
+        verify_env(env_id, args)
+
+    session_id, session_path = init_session(env_id, params, args)
+
+    env = DummyVecEnv([make_godot_env(session_path, env_id, i, args, seed=i) for i in range(args.n_agents)])
+
+    # TODO: Can we automate hyper-parameter optimization?
+
+    # TODO: Add callbacks to monitor the training process
+
+    # TODO: Add feature and reward normalization using VecNormalize
     if args.purge:
         purge_model(params, args)
 
-    model = init_model(params, env, args)
+    model = init_model(session_path, params, env, args)
 
     if args.learn:
         learn(model, params, args)
 
-    # if args.evaluate:
-    #     env = DummyVecEnv([make_godot_env('gym_godot:simple-animat-v0', i, args) for i in range(1)])
-    #     model = init_model(params, env, args)
-    #     evaluate(model, env, args)
+    if args.evaluate:
+        env = DummyVecEnv([make_godot_env(session_path, env_id, i, args) for i in range(4)])
+        model = init_model(session_path, params, env, args)
+        evaluate(model, env, args)
 
     if args.run:
         run(model, env, args)
@@ -272,10 +331,12 @@ def main():
 if __name__ == "__main__":
 
     try:
-        main()
+        main(env_id='gym_godot:simple-animat-v0')
     except KeyboardInterrupt:
+        print('session terminated by user!')
+        sys.exit(1)
+    except Exception as e:
+        print(f'runtime exception raised: {e}!')
+        sys.exit(1)
 
-        try:
-            sys.exit(1)
-        except SystemExit:
-            os._exit(1)
+    sys.exit(0)
