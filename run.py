@@ -27,7 +27,7 @@ from stable_baselines.common import set_global_seeds
 
 from stable_baselines.common.callbacks import CheckpointCallback, CallbackList, EveryNTimesteps
 
-from eval import NonEpisodicEnvMonitor
+from eval import NonEpisodicEnvMonitor, CustomCheckPointCallback
 
 # suppressing tensorflow's debug, info, and warning messages
 tf.get_logger().setLevel('ERROR')
@@ -223,6 +223,7 @@ def purge_model(params, args):
     :return: None
     """
     saved_model = get_model_filepath(params, args, filename=args.model)
+    saved_stats = get_model_filepath(params, args, filename='vec_normalize.pkl')
 
     # TODO: need to also remove saved VecNormalize stats
 
@@ -230,9 +231,10 @@ def purge_model(params, args):
         user_input = input(f'purge previous saved model {saved_model} (yes | no)?')
 
         if user_input.lower() in ['yes', 'y']:
-            print(f'purge requested. removing previously saved model {saved_model}')
+            print(f'purge requested. removing previously saved model {saved_model} and stats')
             try:
                 saved_model.unlink()
+                saved_stats.unlink()
             except FileNotFoundError as e:
                 print(f'Error: file not found {saved_model}!')
                 exit(1)
@@ -252,7 +254,8 @@ def learn(env, model, params, args):
     :return: None
     """
     # add callbacks
-    cp_callback = CheckpointCallback(save_freq=1000, save_path=params['save_dir'], name_prefix='model')
+    # cp_callback = CheckpointCallback(save_freq=1000, save_path=params['save_dir'], name_prefix='model')
+    cp_callback = CustomCheckPointCallback(save_path=params['save_dir'], model_filename='model.zip', verbose=1)
 
     # begin training
     start = time()
@@ -287,7 +290,6 @@ def run(model, env, args):
     while not all(done):
         action, _ = model.predict(obs, deterministic=True)
         obs, rewards, done, info = env.step(action)
-        print(f'done: {done}')
 
 
 def sanitize(string):

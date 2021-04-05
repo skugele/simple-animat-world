@@ -1,3 +1,6 @@
+import os
+
+from pathlib import Path
 from typing import Tuple, Dict, Any, List, Optional
 
 import gym
@@ -60,6 +63,63 @@ class CustomCallback(BaseCallback):
         This event is triggered before exiting the `learn()` method.
         """
         pass
+
+
+class CustomCheckPointCallback(BaseCallback):
+    def __init__(self, save_path, save_freq=1000, model_filename='model.zip', verbose=0):
+        super(CustomCheckPointCallback, self).__init__(verbose)
+
+        CHECKPOINT_PREFIX = '.'
+
+        self.model_filename = model_filename
+        self.model_path = save_path / self.model_filename
+
+        self.save_freq = save_freq
+
+        self.chkpt_dir = Path(save_path)
+        self.chkpt_filename = CHECKPOINT_PREFIX + self.model_filename
+        self.chkpt_filepath = self.chkpt_dir / self.chkpt_filename
+
+    def _init_callback(self) -> None:
+        # create folder if needed
+        if self.chkpt_dir is not None:
+            self.chkpt_dir.mkdir(parents=True, exist_ok=True)
+
+        # remove previous temporary model files
+        if self.chkpt_filepath.exists():
+            if self.verbose:
+                print(f'removing temporary file {self.chkpt_filepath}')
+
+            self.chkpt_filepath.unlink()
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.save_freq == 0:
+            self._update_checkpoint()
+
+        return True
+
+    def _on_training_end(self) -> None:
+        # one final checkpoint to make sure everything is saved
+        self._update_checkpoint()
+
+        if self.verbose:
+            print(f'renaming checkpoint file \'{self.chkpt_filename}\' to permanent model file \'{self.model_filename}\'')
+
+        try:
+            # workaround for WinError 138 that occurs when the file already exists
+            if self.model_path.exists():
+                self.model_path.unlink()
+                
+            # move temporary training file to permanent model file
+            self.chkpt_filepath.rename(self.model_path)
+        except Exception as e:
+            print(f'rename of checkpoint file failed. cause: {e}')
+
+    def _update_checkpoint(self) -> None:
+        if self.verbose:
+            print("saving model checkpoint to {}".format(self.chkpt_filepath))
+
+        self.model.save(self.chkpt_filepath.absolute())
 
 
 class NonEpisodicEnvMonitor(gym.Wrapper):
@@ -139,8 +199,9 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
                 np.savetxt(f, out, delimiter=",")
 
             # stats for watching enjoyment (FIXME: control this with a VERBOSE flag)
-            print(f'*** steps: {self.steps_total}; reward: [cumm = {np.sum(out[:,1])}; avg. = {np.average(out[:,1])}; std. = {np.std(out[:,1])}]',
-                  flush=True)
+            print(
+                f'*** steps: {self.steps_total}; reward: [cumm = {np.sum(out[:, 1])}; avg. = {np.average(out[:, 1])}; std. = {np.std(out[:, 1])}]',
+                flush=True)
 
             self.steps_since_save = 0
             self.steps = []
