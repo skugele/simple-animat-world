@@ -12,8 +12,8 @@ DEFAULT_TIMEOUT = 5000  # in milliseconds
 STEP_REPEAT_COUNT = 1
 
 # TODO: Set this from an observation from Godot
-# DIM_OBSERVATIONS = 6 # SMELL -> 1 & 2, SOMATOSENSORY -> 3, TOUCH -> 4, VELOCITY -> 5 & 6
-DIM_OBSERVATIONS = 2 # SMELL -> 1 & 2
+DIM_OBSERVATIONS = 6 # SMELL -> 1 & 2, SOMATOSENSORY -> 3, TOUCH -> 4, VELOCITY -> 5 & 6
+# DIM_OBSERVATIONS = 2 # SMELL -> 1 & 2
 DIM_ACTIONS = 4
 
 # Keys for connection dictionary
@@ -91,17 +91,7 @@ class SimpleAnimatWorld(gym.Env):
         reward = self._calculate_reward(obs)
         done = self._check_done()
 
-        # return np.concatenate(observations, axis=1)[0, :], reward, done, info
-
-
         self._last_obs = obs
-
-        # FIXME: remove this
-        obs = obs[:2]
-
-        # if self._args.verbose:
-        #     print('agent: {}, step: {}, action: {}, reward: {}, obs: {}'.format(
-        #         self._agent_id, self._curr_step, action, reward, obs), flush=True)
 
         return obs, reward, done, info
 
@@ -259,7 +249,7 @@ class SimpleAnimatWorld(gym.Env):
 
         # TODO: agent death?
         if new_satiety == 0:
-            pass
+            reward -= 10
 
         # reward stronger smells if did not eat
         # if satiety_delta <= 0:
