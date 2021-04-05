@@ -1,24 +1,26 @@
-import argparse
 import sys
-import os
 import re
+import argparse
 from time import time, gmtime, strftime
 from pathlib import Path
+import traceback
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 import gym
 
-from stable_baselines.common.evaluation import evaluate_policy
+from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines import DQN, A2C, PPO2, SAC, ACER, ACKTR
 from stable_baselines.common.policies import MlpPolicy, MlpLstmPolicy
-from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv
+
+# SAC and DQNs have custom (non-common) policy implementations
 from stable_baselines.deepq.policies import MlpPolicy as DqnMlpPolicy
-from stable_baselines.deepq.policies import LnMlpPolicy as DpqLnMlpPolicy
-from stable_baselines import DQN, A2C, PPO2, SAC, ACER
+from stable_baselines.sac.policies import MlpPolicy as SacMlpPolicy
+
+from stable_baselines.common.evaluation import evaluate_policy
 from stable_baselines.common import set_global_seeds
 
 # from stable_baselines import results_plotter
-from stable_baselines.bench import Monitor
 # from stable_baselines.results_plotter import load_results, ts2xy
 # from stable_baselines.common.noise import AdaptiveParamNoiseSpec
 # from stable_baselines.common.callbacks import BaseCallback
@@ -26,6 +28,9 @@ from stable_baselines.bench import Monitor
 from stable_baselines.common.callbacks import CheckpointCallback, CallbackList, EveryNTimesteps
 
 from eval import NonEpisodicEnvMonitor
+
+# suppressing tensorflow's debug, info, and warning messages
+tf.get_logger().setLevel('ERROR')
 
 DEFAULT_ACTION_PORT = 5678
 DEFAULT_OBSERVATION_PORT = 9001
@@ -38,9 +43,11 @@ SAVE_FREQUENCY = 1000  # save freq. in training steps. note: for vectorized envs
 
 algorithm_params = {
     'DQN': {'impl': DQN, 'policy': DqnMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'dqn', 'hyper_params': {}},
-    'PPO2': {'impl': PPO2, 'policy': MlpLstmPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2', 'hyper_params': {}},
+    'PPO2': {'impl': PPO2, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2', 'hyper_params': {}},
     'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c', 'hyper_params': {}},
-    'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer', 'hyper_params': {}}
+    'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer', 'hyper_params': {}},
+    'SAC': {'impl': SAC, 'policy': SacMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'sac', 'hyper_params': {}},
+    'ACKTR': {'impl': ACKTR, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acktr', 'hyper_params': {}},
 }
 
 
@@ -118,14 +125,14 @@ def parse_args():
     return args
 
 
-def get_model_filepath(params, args):
+def get_model_filepath(params, args, filename):
     """ Gets the filepath to the saved model file.
 
     :param params: algorithm parameters for a supported stable-baselines algorithm.
     :param args: an argparse parser object containing command-line argument values
     :return:
     """
-    return params['save_dir'] / args.model
+    return params['save_dir'] / filename
 
 
 def get_stats_filepath(session_path, agent_id):
@@ -157,15 +164,20 @@ def init_model(session_path, params, env, args):
 
     :return: an instantiated stable-baselines model for the requested RL algorithm
     """
-    algorithm, policy, saved_model = params['impl'], params['policy'], get_model_filepath(params, args)
+    algorithm, policy, saved_model = params['impl'], params['policy'], get_model_filepath(params, args,
+                                                                                          filename=args.model)
 
     # Custom MLP policy of two layers of size 32 each with tanh activation function
     # policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=[8, 8])
 
-    return algorithm.load(saved_model.absolute(), env=env, tensorboard_log=get_tensorboard_path(session_path)) \
-        if saved_model.exists() \
-        else algorithm(policy, env, **params['hyper_params'], verbose=args.verbose,
-                       tensorboard_log=get_tensorboard_path(session_path))
+    if saved_model.exists():
+        return algorithm.load(saved_model.absolute(),
+                              env=env,
+                              tensorboard_log=get_tensorboard_path(session_path))
+    else:
+        return algorithm(policy, env, **params['hyper_params'],
+                         verbose=args.verbose,
+                         tensorboard_log=get_tensorboard_path(session_path))
 
 
 def make_godot_env(session_path, env_id, agent_id, args, seed=0):
@@ -210,7 +222,9 @@ def purge_model(params, args):
     :param args: an argparse parser object containing command-line argument values
     :return: None
     """
-    saved_model = get_model_filepath(params, args)
+    saved_model = get_model_filepath(params, args, filename=args.model)
+
+    # TODO: need to also remove saved VecNormalize stats
 
     if saved_model.exists():
         user_input = input(f'purge previous saved model {saved_model} (yes | no)?')
@@ -227,7 +241,7 @@ def purge_model(params, args):
             exit(1)
 
 
-def learn(model, params, args):
+def learn(env, model, params, args):
     """ Executes an RL algorithm training loop on the environment for the specified number of steps.
 
     After training results are saved in the specified model file.
@@ -248,7 +262,8 @@ def learn(model, params, args):
     print(f'elapsed time: {strftime("%H:%M:%S", gmtime(end - start))}')
 
     # save training results
-    model.save(get_model_filepath(params, args))
+    model.save(get_model_filepath(params, args, filename=args.model))
+    env.save(get_model_filepath(params, args, filename='vec_normalize.pkl'))
 
 
 def evaluate(model, env, args):
@@ -304,6 +319,12 @@ def main(env_id):
 
     env = DummyVecEnv([make_godot_env(session_path, env_id, i, args, seed=i) for i in range(args.n_agents)])
 
+    env_stats_path = get_model_filepath(params, args, filename='vec_normalize.pkl')
+    if env_stats_path.exists():
+        env = VecNormalize.load(env_stats_path, env)
+    else:
+        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=1.0, clip_reward=100.0)
+
     # TODO: Can we automate hyper-parameter optimization?
 
     # TODO: Add callbacks to monitor the training process
@@ -315,10 +336,10 @@ def main(env_id):
     model = init_model(session_path, params, env, args)
 
     if args.learn:
-        learn(model, params, args)
+        learn(env, model, params, args)
 
     if args.evaluate:
-        env = DummyVecEnv([make_godot_env(session_path, env_id, i, args) for i in range(4)])
+        env = DummyVecEnv([make_godot_env(session_path, env_id, i, args) for i in range(1)])
         model = init_model(session_path, params, env, args)
         evaluate(model, env, args)
 
@@ -337,6 +358,7 @@ if __name__ == "__main__":
         sys.exit(1)
     except Exception as e:
         print(f'runtime exception raised: {e}!')
+        print(traceback.format_exc())
         sys.exit(1)
 
     sys.exit(0)
