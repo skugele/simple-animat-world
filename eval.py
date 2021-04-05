@@ -132,7 +132,11 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
         self.steps_since_save += 1
         if self.steps_since_save >= self.save_freq:
             out = np.column_stack((np.array(self.steps), np.array(self.rewards)))
-            np.savetxt(self.filename, out, delimiter=",")
+
+            # save results to file
+            with open(self.filename, "ab") as f:
+                f.write(b'\n')
+                np.savetxt(f, out, delimiter=",")
 
             # stats for watching enjoyment (FIXME: control this with a VERBOSE flag)
             print(f'*** steps: {self.steps_total}; reward: [cumm = {np.sum(out[:,1])}; avg. = {np.average(out[:,1])}; std. = {np.std(out[:,1])}]',
