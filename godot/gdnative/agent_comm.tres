@@ -2,4 +2,4 @@
 
 [resource]
 entry/Windows.64 = "res://gdnative/win64/libagentcomm.dll"
-dependency/Windows.64 = [  ]
+dependency/Windows.64 = [ "res://gdnative/win64/libzmq-v142-mt-4_3_5.dll", "res://gdnative/win64/zmqpp.dll" ]

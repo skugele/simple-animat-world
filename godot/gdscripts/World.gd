@@ -22,24 +22,30 @@ const ZOOM_OUT_DIRECTION = 1
 # ZeroMQ Communication Settings
 onready var agent_comm = $ZeroMqComm
 onready var pub_context = null
-onready var pub_options = {
-	'port':9001, 
-	'protocol':'tcp'
-}
-
-# TODO: This doesn't do anything yet. Need to modify action listener to accept a dictionary of arguments
-onready var server_options = {
-	'port':9002, 
-	'protocol':'tcp'
-}
+onready var pub_options = {'port':10001, 'protocol':'tcp'}
+onready var server_options = {'port':10002, 'protocol':'tcp'}
 
 onready var initialized = false
+onready var cmdline_args = {}
 
-# Called when the node enters the scene tree for the first time.
+func process_cmdline_args():
+	for argument in OS.get_cmdline_args():
+		if argument.find("=") > -1:
+			var key_value = argument.split("=")
+			cmdline_args[key_value[0].lstrip("--")] = key_value[1]
+			
+	if not cmdline_args.empty():
+		print('received the following command line arguments: ', cmdline_args)
+
+func set_fps():
+	if cmdline_args.has('fps'):
+		Engine.set_target_fps(int(cmdline_args['fps']))
+	
 func _ready():
+	process_cmdline_args()
+	set_fps()
 	init_camera()
 	init_agent_comm()
-	
 	create_world()
 	
 	initialized = true
@@ -56,6 +62,12 @@ func init_camera():
 	$Observer.set_camera(camera)
 	
 func init_agent_comm():
+	if cmdline_args.has('obs_port'):
+		pub_options['port'] = cmdline_args['obs_port']
+		
+	if cmdline_args.has('action_port'):
+		server_options['port'] = cmdline_args['action_port']
+		
 	pub_context = agent_comm.connect(pub_options)
 	agent_comm.start_listener(server_options)	
 	
@@ -149,7 +161,9 @@ func spawn(n, scene, parent):
 			
 func create_random_objects():
 	
-	var n_agents_to_spawn = Globals.N_AGENTS - $Agents.get_child_count()
+	var agent_target = int(cmdline_args['n_agents']) if cmdline_args.has('n_agents') else Globals.N_AGENTS
+	
+	var n_agents_to_spawn = agent_target - $Agents.get_child_count()
 	if (n_agents_to_spawn > 0):
 		spawn(n_agents_to_spawn, "res://scenes/Agent.tscn", $Agents)
 		
