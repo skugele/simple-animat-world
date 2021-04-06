@@ -1,3 +1,4 @@
+import argparse
 import os
 
 from pathlib import Path
@@ -103,13 +104,14 @@ class CustomCheckPointCallback(BaseCallback):
         self._update_checkpoint()
 
         if self.verbose:
-            print(f'renaming checkpoint file \'{self.chkpt_filename}\' to permanent model file \'{self.model_filename}\'')
+            print(
+                f'renaming checkpoint file \'{self.chkpt_filename}\' to permanent model file \'{self.model_filename}\'')
 
         try:
             # workaround for WinError 138 that occurs when the file already exists
             if self.model_path.exists():
                 self.model_path.unlink()
-                
+
             # move temporary training file to permanent model file
             self.chkpt_filepath.rename(self.model_path)
         except Exception as e:
@@ -195,7 +197,6 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
 
             # save results to file
             with open(self.filename, "ab") as f:
-                f.write(b'\n')
                 np.savetxt(f, out, delimiter=",")
 
             # stats for watching enjoyment (FIXME: control this with a VERBOSE flag)
@@ -242,17 +243,16 @@ def moving_average(values, window):
     return np.convolve(values, weights, 'valid')
 
 
-def plot_results(log_folder, title='Learning Curve'):
+def plot_results(x, y, window_size=500, title='Learning Curve'):
     """
     plot the results
 
     :param log_folder: (str) the save location of the results to plot
     :param title: (str) the title of the task to plot
     """
-    x, y = ts2xy(load_results(log_folder), 'timesteps')
-    y = moving_average(y, window=50)
-    # Truncate x
-    x = x[len(x) - len(y):]
+    y = moving_average(y, window=window_size)
+    # # # Truncate x
+    x = x[x.shape[0] - y.shape[0]:]
 
     fig = plt.figure(title)
     plt.plot(x, y)
@@ -260,3 +260,29 @@ def plot_results(log_folder, title='Learning Curve'):
     plt.ylabel('Rewards')
     plt.title(title + " Smoothed")
     plt.show()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='A driver script for the evaluation of an RL model')
+
+    parser.add_argument('--session_id', metavar='ID', type=str, required=False,
+                        help='a session id to use', default=None)
+    parser.add_argument('--path', metavar='FILE', type=Path, required=False,
+                        help='a path to the data file(s)')
+
+    # modes
+    parser.add_argument('--summary', required=False, action="store_true",
+                        help='verifies the environment conforms to OpenAI gym standards')
+    parser.add_argument('--plot', required=False, action="store_true",
+                        help='verifies the environment conforms to OpenAI gym standards')
+
+    args = parser.parse_args()
+
+    if not (args.session_id or args.path):
+        exit(1)
+
+    if args.session_id:
+        files = Path(f'tmp/{args.session_id}/monitor').glob('*.csv')
+        for file in files:
+            steps, rewards = [a.flatten() for a in np.split(np.loadtxt(file, delimiter=','), 2, axis=1)]
+            plot_results(x=steps, y=rewards)

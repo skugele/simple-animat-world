@@ -70,8 +70,7 @@ def parse_args():
 
     :return: an argparse parser containing the commandline arguments
     """
-
-    parser = argparse.ArgumentParser(description='A driver script for a Godot agent')
+    parser = argparse.ArgumentParser(description='A driver script for the training and execution of a Godot agent')
 
     parser.add_argument('--n_agents', metavar='N', type=int, required=False, default=1,
                         help='the number of training agents to spawn')
