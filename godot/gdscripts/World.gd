@@ -4,8 +4,11 @@ onready var teleop_enabled = false
 
 onready var followed_agent = null
 
+# agent ids -> agent objects
 var agent_registry = {}
-var pending_actions = []
+
+# a FIFO with elements of the form {agent ids: event}
+var agent_events = []
 
 # camera and related constants
 onready var zoom = DEFAULT_ZOOM
@@ -70,12 +73,54 @@ func init_agent_comm():
 		
 	pub_context = agent_comm.connect(pub_options)
 	agent_comm.start_listener(server_options)	
-	
+
 
 func _process(delta):
 	# check for actions from human-controlled agents
 	if teleop_enabled and followed_agent:
 		process_teleop_action()
+
+func add_agent(id):
+	print('agent %s attempting to join world' % id)
+	if agent_registry.has(id) and agent_registry[id] != null:
+		print('\'join\' operation with agent id %s failed: id already in use.' % [id])
+		return
+
+	# loop is to handle collisions (note: this is dangerous because it could
+	# be an infinite or long running loop!)
+	var agent = null
+	while not agent:
+		var objs = spawn(1, "res://scenes/Agent.tscn", $Agents)
+		if not objs.empty():
+			agent = objs[0]
+	
+	agent.id = id
+	agent_registry[id] = agent
+		
+	add_agent_signal_handlers(agent)
+	print('agent %s successfully joined the world' % id)
+	
+func remove_agent(id):
+	print('agent %s attempting to leave world' % id)
+	
+	if agent_registry.has(id) and agent_registry[id] != null:
+		var agent = agent_registry[id]
+		agent_registry[id] = null
+		agent.call_deferred("queue_free")
+		print('agent %s successfully left the world' % id)
+	else:
+		print('\'quit\' operation with agent id %s failed: id not found.' % [id])
+			
+func process_event(event):
+	if event == null:
+		return
+		
+	if event['type'] == 'join':
+		add_agent(event['id'])					
+	elif event['type'] == 'quit':
+		remove_agent(event['id'])
+	else:
+		print('unknown event')
 	
 func _physics_process(delta):
 	
@@ -83,14 +128,21 @@ func _physics_process(delta):
 	if (n_food_to_spawn > 0):
 		spawn(n_food_to_spawn, "res://scenes/Food.tscn", $Food)
 	
+	process_event(agent_events.pop_front())
+	
 	for agent in agent_registry.values():
 		publish_sensors_state(agent)
 
-
 func get_sensors_topic(agent):
+	if agent == null:
+		return null
+		
 	return Globals.SENSORS_STATE_TOPIC_FORMAT.format({'agent_id':agent.id})
 	
 func get_sensors_message(agent):
+	if agent == null:
+		return null
+		
 	var msg = {}
 	
 	# add smell sensor
@@ -104,27 +156,29 @@ func get_sensors_message(agent):
 	return msg
 	
 func publish_sensors_state(agent):
+	if agent == null:
+		return
+		
 	var topic = get_sensors_topic(agent)
 	var msg = get_sensors_message(agent)
 	
 #	print('publishing to topic ', topic)
 #	print('message: ', msg)
-	agent_comm.send(msg, pub_context, topic)
+	if msg and topic:
+		agent_comm.send(msg, pub_context, topic)
 
-func has_collision(obj):
+func has_collision(global_pos, shape, exclude):
 	var space_rid = get_world_2d().space
 	var space_state = Physics2DServer.space_get_direct_state(space_rid)
 
-	var shape = obj.get_node("CollisionShape2D").shape
-
 	# translates shape's location to the object's global position
 	var transform = Transform2D()
-	transform.origin = obj.global_position
+	transform.origin = global_pos
 		
 	var query = Physics2DShapeQueryParameters.new()
 	query.set_shape(shape)
 	query.set_transform(transform)
-	query.set_exclude([obj])
+	query.set_exclude([exclude])
 	query.collision_layer = Globals.OBSTACLES_LAYER | Globals.AGENTS_LAYER | Globals.EDIBLES_LAYER
 
 	var results = space_state.intersect_shape(query, 1)
@@ -133,8 +187,10 @@ func has_collision(obj):
 #		print(result)
 
 	return len(results) > 0
-
+	
 func create_objects(scene, locations, parent):
+	var new_objs = []
+	
 	for loc in locations:
 		var obj = load(scene).instance()
 		obj.position = loc
@@ -146,19 +202,27 @@ func create_objects(scene, locations, parent):
 		parent.add_child(obj)
 			
 		# check for collision with existing object
-		if has_collision(obj):
+		var global_pos = obj.global_position
+		var shape = obj.get_node("CollisionShape2D").shape
+		
+		if has_collision(global_pos, shape, obj):
 			obj.free()
 		else:
 			obj.visible = true	
+			new_objs.append(obj)
+			
+	return new_objs
+
+func get_random_position():
+	return Vector2(rand_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]), 
+				   rand_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))
 
 func spawn(n, scene, parent):
-	
+	var new_objs = []
 	for obj in range(n):
-		create_objects(scene, 
-			[Vector2(rand_range(Globals.WORLD_HORIZ_EXTENT[0], Globals.WORLD_HORIZ_EXTENT[1]), 
-					 rand_range(Globals.WORLD_VERT_EXTENT[0], Globals.WORLD_VERT_EXTENT[1]))], 
-			parent)	
-			
+		new_objs += create_objects(scene, [get_random_position()], parent)
+	return new_objs
+	
 func create_random_objects():
 	
 	var agent_target = int(cmdline_args['n_agents']) if cmdline_args.has('n_agents') else Globals.N_AGENTS
@@ -311,24 +375,42 @@ func _on_remote_action_received(action_details):
 	var header = action_details['header']	
 	var data = action_details['data']
 
-	if not (header.has('seqno') and header.has('id')):
-		print('malformed message header %s : expecting \'seqno\' and \'id\'' % header)
+	if not (header.has('type') and header.has('id')):
+		print('malformed message header %s : expecting \'type\' and \'id\'' % header)
 		return	
 	
+	var type = header['type']
 	var id = header['id']	
-	var seqno = header['seqno']
-	
-	if not data.has('action'):
-		print('malformed message data %s : expecting \'action\'' % data)
-		return	
-	
-	var actions = data['action']
-	
-	# ignore incoming remote actions for human controlled agent
-	if (teleop_enabled and id == followed_agent.id):
-		return
+
+	if type == 'action':
+		var agent = agent_registry[id]
+		if not agent:
+			print('unknown agent id: ', id)
+			return
+					
+		if not header.has('seqno'):
+			print('malformed message header %s : expecting \'seqno\'' % header)
+			return	
 		
-	var agent = agent_registry[id]
-	if agent:
+		if not data.has('action'):
+			print('malformed message data %s : expecting \'action\'' % data)
+			return	
+		
+		var seqno = header['seqno']
+		var actions = data['action']
+		
+		# ignore incoming remote actions for human controlled agent
+		if (teleop_enabled and id == followed_agent.id):
+			return
+			
 #		print('adding action: ', actions)
 		agent.add_action(seqno, actions)
+			
+	elif type == 'quit':
+		agent_events.push_back({'id':id, 'type':'quit'})
+		
+	elif type == 'join':
+		agent_events.push_back({'id':id, 'type':'join'})
+		
+	else:
+		print('unknown request type \'%s\' for agent with id \'%s\'' % [type, id])
