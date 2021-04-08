@@ -8,6 +8,8 @@
 [node name="World" type="Node2D"]
 position = Vector2( 0, -1 )
 script = ExtResource( 4 )
+MAX_ZOOM_OUT = 50.0
+DEFAULT_ZOOM = 35.0
 
 [node name="Observer" parent="." instance=ExtResource( 2 )]
 position = Vector2( 4603.29, 0 )
@@ -20,23 +22,23 @@ position = Vector2( 4603.29, 0 )
 
 [node name="Walls" type="Node2D" parent="."]
 
-[node name="Wall" parent="Walls" instance=ExtResource( 3 )]
-position = Vector2( 0, 200 )
-scale = Vector2( 1, 20 )
+[node name="Wall1" parent="Walls" instance=ExtResource( 3 )]
+position = Vector2( 15000, 0 )
+scale = Vector2( 0.718848, 59.5324 )
 
 [node name="Wall2" parent="Walls" instance=ExtResource( 3 )]
-position = Vector2( 9000, 200 )
-scale = Vector2( 1, 20 )
+position = Vector2( -15000, 0 )
+scale = Vector2( 0.718848, 59.5324 )
+
+[node name="Wall3" parent="Walls" instance=ExtResource( 3 )]
+position = Vector2( -21.6621, -12740.3 )
+rotation = 1.5708
+scale = Vector2( -0.7, 70 )
 
 [node name="Wall4" parent="Walls" instance=ExtResource( 3 )]
-position = Vector2( 4509.35, 4538.46 )
+position = Vector2( -21.6621, 12730.7 )
 rotation = 1.5708
-scale = Vector2( 1, 21.4 )
-
-[node name="Wall5" parent="Walls" instance=ExtResource( 3 )]
-position = Vector2( 4498.35, -4132.54 )
-rotation = 1.5708
-scale = Vector2( 1, 21.4 )
+scale = Vector2( -0.7, 70 )
 
 [node name="ZeroMqComm" parent="." instance=ExtResource( 5 )]
 [connection signal="action_received" from="ZeroMqComm" to="." method="_on_remote_action_received"]
