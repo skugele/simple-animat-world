@@ -15,9 +15,9 @@ onready var zoom = DEFAULT_ZOOM
 onready var camera = null
 
 export(float) var MAX_ZOOM_IN = 1
-export(float) var MAX_ZOOM_OUT = 16
-export(float) var DEFAULT_ZOOM = 12
-export(float) var ZOOM_DELTA = 0.4
+export(float) var MAX_ZOOM_OUT = 50
+export(float) var DEFAULT_ZOOM = 35
+export(float) var ZOOM_DELTA = 1.0
 
 const ZOOM_IN_DIRECTION = -1
 const ZOOM_OUT_DIRECTION = 1

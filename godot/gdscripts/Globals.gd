@@ -27,12 +27,12 @@ const CAMERA_SMOOTHING_SPEED = 2
 ###############################
 const RANDOMIZED = true
 
-const N_RANDOM_FOOD = 10
+const N_RANDOM_FOOD = 50
 const N_RANDOM_OBS = 175
 const N_AGENTS = 0
 
-const WORLD_HORIZ_EXTENT = [100, 8900]
-const WORLD_VERT_EXTENT = [-4000, 4000]
+const WORLD_HORIZ_EXTENT = [-15000, 15000]
+const WORLD_VERT_EXTENT = [-12000, 12000]
 
 ###################
 # agent constants #
