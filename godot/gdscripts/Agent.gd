@@ -17,7 +17,7 @@ onready var active_scents_right = {} # dictionary of scent emitters ids -> activ
 
 onready var active_scents_left_combined = Globals.NULL_SMELL
 onready var active_scents_right_combined = Globals.NULL_SMELL
-onready var active_scents_combined = []
+onready var active_scents_combined = [0.0, 0.0]
 
 onready var ignored_scents = [] # ignore own smells
 
@@ -52,23 +52,32 @@ onready var agent_alive = true
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	id = Globals.generate_agent_id()
+	pass
+#	id = Globals.generate_agent_id()
 	
 #	action_thread = Thread.new()
 #	action_thread.start(self, "_process_actions")
 
-func _process_actions(delta):
-	var pending_action = pending_actions.pop_front()
-	if pending_action != null:
-		execute(pending_action['action'], delta)
-		
-		velocity = move_and_slide(velocity)
-		
-		last_action_seqno = pending_action['seqno']
-	else:
-		# process friction
-		velocity = velocity.move_toward(Vector2.ZERO, Globals.AGENT_WALKING_FRICTION * delta)		
+func reset():
+	stats.reset()
+	last_action_seqno = -1
 
+func enable():
+	self.visible = true
+	$CollisionShape2D.disabled = false
+	$Mouth/Area2D/CollisionShape2D.disabled = false
+	$AntennaLeft/Area2D/CollisionShape2D.disabled = false
+	$AntennaRight/Area2D/CollisionShape2D.disabled = false
+	$TactileSensor/CollisionShape2D.disabled = false
+	
+func disable():
+	self.visible = false
+	$CollisionShape2D.disabled = true
+	$Mouth/Area2D/CollisionShape2D.disabled = true
+	$AntennaLeft/Area2D/CollisionShape2D.disabled = true
+	$AntennaRight/Area2D/CollisionShape2D.disabled = true
+	$TactileSensor/CollisionShape2D.disabled = true
+	
 func _exit_tree():
 	pass
 	# safely clean-up action thread
@@ -76,10 +85,15 @@ func _exit_tree():
 #	pending_actions_semaphore.post()
 #	action_thread.wait_to_finish()
 	
-				
 func _process(delta):
-
-	_process_actions(delta)
+	var pending_action = pending_actions.pop_front()	
+	if pending_action:
+		execute(pending_action['action'], delta)
+		velocity = move_and_slide(velocity)		
+		last_action_seqno = pending_action['seqno']
+	else:
+		# process friction		
+		velocity = velocity.move_toward(Vector2.ZERO, Globals.AGENT_WALKING_FRICTION * delta)		
 	
 	if velocity != Vector2.ZERO:
 		velocity = move_and_slide(velocity)

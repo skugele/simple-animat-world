@@ -21,15 +21,10 @@ signal agent_dead
 #############
 # functions #
 #############
-
+	
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	
-	health = Globals.AGENT_INITIAL_HEALTH
-	energy = Globals.AGENT_INITIAL_ENERGY
-	satiety = Globals.AGENT_INITIAL_SATIETY
-	
-	poison_consumed = 0.0
+	reset()
 
 func _process(delta):
 	
@@ -99,6 +94,13 @@ func is_dead():
 	
 func is_exhausted():
 	return energy <= 0
-
+	
+func reset():
+	health = Globals.AGENT_INITIAL_HEALTH
+	energy = Globals.AGENT_INITIAL_ENERGY
+	satiety = Globals.AGENT_INITIAL_SATIETY
+	
+	poison_consumed = 0.0	
+	
 func as_list():
 	return [health, energy, satiety]

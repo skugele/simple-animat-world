@@ -27,19 +27,19 @@ const CAMERA_SMOOTHING_SPEED = 2
 ###############################
 const RANDOMIZED = true
 
-const N_RANDOM_FOOD = 25
+const N_RANDOM_FOOD = 10
 const N_RANDOM_OBS = 175
-const N_AGENTS = 4
+const N_AGENTS = 0
 
-const WORLD_HORIZ_EXTENT = [0, 9000]
-const WORLD_VERT_EXTENT = [-4100, 4500]
+const WORLD_HORIZ_EXTENT = [100, 8900]
+const WORLD_VERT_EXTENT = [-4000, 4000]
 
 ###################
 # agent constants #
 ###################
 const AGENT_INITIAL_HEALTH = 100
 const AGENT_INITIAL_ENERGY = 50
-const AGENT_INITIAL_SATIETY = 1000
+const AGENT_INITIAL_SATIETY = 250
 
 const AGENT_MAX_HEALTH = 100
 const AGENT_MAX_ENERGY = 100
@@ -86,7 +86,7 @@ const NOOP_ACTION = 0
 const MAX_PENDING_ACTIONS = 1
 
 const SMELL_DIMENSIONS = 1
-const SMELL_DETECTABLE_RADIUS = 2000.0
+const SMELL_DETECTABLE_RADIUS = 5000.0
 const SMELL_DISTANCE_MULTIPLIER = 5.0
 const SMELL_DISTANCE_EXPONENT = 3.0
 

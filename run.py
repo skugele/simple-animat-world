@@ -1,6 +1,7 @@
 import sys
 import re
 import argparse
+from collections import namedtuple
 from time import time, gmtime, strftime
 from pathlib import Path
 import traceback
@@ -8,6 +9,7 @@ import traceback
 import numpy as np
 import tensorflow as tf
 import gym
+from stable_baselines.bench import Monitor
 
 from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 from stable_baselines import DQN, A2C, PPO2, SAC, ACER, ACKTR
@@ -32,8 +34,8 @@ from eval import NonEpisodicEnvMonitor, CustomCheckPointCallback
 # suppressing tensorflow's debug, info, and warning messages
 tf.get_logger().setLevel('ERROR')
 
-DEFAULT_ACTION_PORT = 5678
-DEFAULT_OBSERVATION_PORT = 9001
+DEFAULT_OBSERVATION_PORT = 10001
+DEFAULT_ACTION_PORT = 10002
 
 RUNTIME_PATH = Path('tmp/')
 BASE_MODEL_PATH = Path('save/stable-baselines')
@@ -179,26 +181,42 @@ def init_model(session_path, params, env, args):
                          tensorboard_log=get_tensorboard_path(session_path))
 
 
-def make_godot_env(session_path, env_id, agent_id, args, seed=0):
+def make_godot_env(session_path, env_id, agent_id, obs_port, action_port, args, seed=0):
     """
     Utility function for multiprocessed env.
 
     :param session_path: (str) the session ID
     :param env_id: (str) the environment ID
     :param agent_id: the agent identifier in Godot environment
-    :param num_env: (int) the number of environments you wish to have in subprocesses
+    :param action_port: port number for Godot action server
+    :param obs_port: port number for Godot observation publisher
     :param args: command-line arguments (i.e., an argparse parser)
     :param seed: (int) the initial seed for RNG
     """
 
     def _init():
-        env = gym.make(env_id, agent_id=agent_id, args=args)
+        env = gym.make(env_id, agent_id=agent_id, obs_port=obs_port, action_port=action_port, args=args)
         env = NonEpisodicEnvMonitor(env, filename=get_stats_filepath(session_path, agent_id), freq=100)
         env.seed(seed + agent_id)
         return env
 
     set_global_seeds(seed)
     return _init
+
+
+GodotInstance = namedtuple('GodotInstance', ['obs_port', 'action_port'])
+
+
+def create_env(args, env_id, godot_instances, params, session_path):
+    env = SubprocVecEnv([make_godot_env(session_path, env_id, i, obs_port, action_port, args, seed=i)
+                            for i in range(args.n_agents) for obs_port, action_port in godot_instances])
+
+    env_stats_path = get_model_filepath(params, args, filename='vec_normalize.pkl')
+    if env_stats_path.exists():
+        env = VecNormalize.load(env_stats_path, env)
+    else:
+        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=1.0, clip_reward=100.0)
+    return env
 
 
 def verify_env(env_id, args):
@@ -317,20 +335,16 @@ def main(env_id):
         verify_env(env_id, args)
 
     session_id, session_path = init_session(env_id, params, args)
-
-    env = DummyVecEnv([make_godot_env(session_path, env_id, i, args, seed=i) for i in range(args.n_agents)])
-
-    env_stats_path = get_model_filepath(params, args, filename='vec_normalize.pkl')
-    if env_stats_path.exists():
-        env = VecNormalize.load(env_stats_path, env)
-    else:
-        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=1.0, clip_reward=100.0)
+    godot_instances = [
+        GodotInstance(10001, 10002),
+        GodotInstance(10003, 10004),
+        GodotInstance(10005, 10006),
+        GodotInstance(10007, 10008)
+    ]
+    env = create_env(args, env_id, godot_instances, params, session_path)
 
     # TODO: Can we automate hyper-parameter optimization?
 
-    # TODO: Add callbacks to monitor the training process
-
-    # TODO: Add feature and reward normalization using VecNormalize
     if args.purge:
         purge_model(params, args)
 
@@ -339,10 +353,10 @@ def main(env_id):
     if args.learn:
         learn(env, model, params, args)
 
-    if args.evaluate:
-        env = DummyVecEnv([make_godot_env(session_path, env_id, i, args) for i in range(1)])
-        model = init_model(session_path, params, env, args)
-        evaluate(model, env, args)
+    # if args.evaluate:
+    #     env = DummyVecEnv([make_godot_env(session_path, env_id, i, args) for i in range(1)])
+    #     model = init_model(session_path, params, env, args)
+    #     evaluate(model, env, args)
 
     if args.run:
         run(model, env, args)
@@ -354,12 +368,7 @@ if __name__ == "__main__":
 
     try:
         main(env_id='gym_godot:simple-animat-v0')
-    except KeyboardInterrupt:
-        print('session terminated by user!')
-        sys.exit(1)
     except Exception as e:
-        print(f'runtime exception raised: {e}!')
-        print(traceback.format_exc())
         sys.exit(1)
 
     sys.exit(0)

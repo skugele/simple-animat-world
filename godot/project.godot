@@ -100,8 +100,9 @@ toggle_teleop={
 
 [physics]
 
-common/physics_fps=100
+common/physics_fps=20
 
 [rendering]
 
+threads/thread_model=2
 environment/default_environment="res://default_env.tres"
