@@ -74,24 +74,16 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description='A driver script for the training and execution of a Godot agent')
 
-    parser.add_argument('--n_agents', metavar='N', type=int, required=False, default=1,
-                        help='the number of training agents to spawn')
-
-    # TODO: I may need to rethink all of these with respect to vectorized environments.
-    parser.add_argument('--action_port', metavar='PORT', type=int, required=False, default=DEFAULT_ACTION_PORT,
-                        help='the port number of the Godot action listener')
-    parser.add_argument('--obs_port', metavar='PORT', type=int, required=False, default=DEFAULT_OBSERVATION_PORT,
-                        help='the port number of the Godot observation publisher')
-    parser.add_argument('--topic', metavar='ID', required=False,
-                        help='the topics to subscribe', default='')
+    parser.add_argument('--n_agents_per_env', metavar='N', type=int, required=False, default=1,
+                        help='the number of training agents to spawn per godot environment')
+    parser.add_argument('--n_godot_instances', metavar='N', type=int, required=False, default=1,
+                        help='the number of available godot environments')
 
     # algorithm parameters
     parser.add_argument('--algorithm', metavar='ID', type=str.upper, required=False, default='DQN',
                         help=f'the algorithm to execute. available algorithms: {",".join(algorithm_params.keys())}')
     parser.add_argument('--steps', metavar='N', type=int, required=False, default=10000,
                         help='the number of environment steps to execute')
-    parser.add_argument('--steps_per_episode', metavar='N', type=int, required=False, default=np.inf,
-                        help='the number of steps per episode')
 
     # saved model options
     parser.add_argument('--model', metavar='FILE', type=Path, required=False,
@@ -140,8 +132,7 @@ def get_stats_filepath(session_path, agent_id):
     """ Gets the filepath to the run statistics file. """
 
     stats_dir = session_path / 'monitor'
-    if not stats_dir.exists():
-        stats_dir.mkdir()
+    stats_dir.mkdir(exist_ok=True)
 
     # TODO: if the filename ends in ".gz" then numpy will automatically use compression.
     return stats_dir / f'agent_{agent_id}.csv'
@@ -209,7 +200,7 @@ GodotInstance = namedtuple('GodotInstance', ['obs_port', 'action_port'])
 
 def create_env(args, env_id, godot_instances, params, session_path):
     env = SubprocVecEnv([make_godot_env(session_path, env_id, i, obs_port, action_port, args, seed=i)
-                            for i in range(args.n_agents) for obs_port, action_port in godot_instances])
+                         for i in range(args.n_agents_per_env) for obs_port, action_port in godot_instances])
 
     env_stats_path = get_model_filepath(params, args, filename='vec_normalize.pkl')
     if env_stats_path.exists():
@@ -334,19 +325,18 @@ def main(env_id):
     if args.verify:
         verify_env(env_id, args)
 
+    if args.purge:
+        purge_model(params, args)
+
     session_id, session_path = init_session(env_id, params, args)
-    godot_instances = [
-        GodotInstance(10001, 10002),
-        GodotInstance(10003, 10004),
-        GodotInstance(10005, 10006),
-        GodotInstance(10007, 10008)
-    ]
+
+    # FIXME: this assumes that port assignment begins at port 10001, but those ports may not be available!
+    godot_instances = [GodotInstance(o_port, a_port) for o_port, a_port in
+                       map(lambda i: (10001 + i * 2, 10002 + i * 2), range(args.n_godot_instances))]
+
     env = create_env(args, env_id, godot_instances, params, session_path)
 
     # TODO: Can we automate hyper-parameter optimization?
-
-    if args.purge:
-        purge_model(params, args)
 
     model = init_model(session_path, params, env, args)
 
@@ -358,7 +348,7 @@ def main(env_id):
     #     model = init_model(session_path, params, env, args)
     #     evaluate(model, env, args)
 
-    if args.run:
+    elif args.run:
         run(model, env, args)
 
     env.close()

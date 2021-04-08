@@ -1,13 +1,13 @@
+import sys
+
 import zmq
 import numpy as np
 import json
 import gym
 
-from time import sleep
-
 from stable_baselines.common.env_checker import check_env
 
-DEFAULT_TIMEOUT = 1000  # in milliseconds
+DEFAULT_TIMEOUT = 100  # in milliseconds
 
 STEP_REPEAT_COUNT = 1
 
@@ -49,10 +49,13 @@ class SimpleAnimatWorld(gym.Env):
         self._args = args
 
         self._curr_step = 0
-        self._max_step = self._args.steps_per_episode
+        self._max_step = np.inf # TODO: it may be useful to have max steps at some point, but
+                                # TODO: for now the agent will continue until death
+
+        self._curr_action_seqno = 0
+
         self._last_obs = None
-        self._action_seqno = 0
-        self._last_obs_action = -1
+        self._last_obs_action_seqno = -1
 
         self.action_space = gym.spaces.Discrete(2 ** DIM_ACTIONS - 1)
         self.observation_space = gym.spaces.Box(low=0, high=np.inf, shape=(DIM_OBSERVATIONS,))
@@ -76,28 +79,27 @@ class SimpleAnimatWorld(gym.Env):
 
         self._curr_step += 1
 
-        # observations = []  # a set of agent observations from Godot
-        info = {}  # metadata about agent's observations
-
         self._send_action_to_godot(action)
 
         wait_count = 0
         meta, obs = None, None
-        while self._last_obs_action < self._action_seqno:
+        while self._last_obs_action_seqno < self._curr_action_seqno:
             meta, obs = self._receive_observation_from_godot()
             wait_count += 1
 
             # assume that the action was lost, resending
             if wait_count % 10 == 0:
-                print(f'agent {self._agent_id} is resending last action {action}', flush=True)
+                print(f'agent {self._agent_id} is resending last action {action}',
+                      file=sys.stderr,
+                      flush=True)
                 self._send_action_to_godot(action)
 
-        info['godot_info'] = meta
-
-        # TODO: This should be determined in the agent's code
+        # remaining return values
         reward = self._calculate_reward(obs)
         done = self._check_done()
+        info = {'godot_info': meta}  # metadata about agent's observations
 
+        # this must be set after the call to _calculate_reward!
         self._last_obs = obs
 
         return obs, reward, done, info
@@ -105,11 +107,10 @@ class SimpleAnimatWorld(gym.Env):
     def reset(self):
         """ respawns the agent within a running Godot environment and returns an initial observation """
 
-        self._reset_history()
-
         if self._joined_world:
             self._send_quit_to_godot()
 
+        self._reset_history()
         self._send_join_to_godot()
 
         obs, _, _, _ = self.step(0)
@@ -134,10 +135,9 @@ class SimpleAnimatWorld(gym.Env):
 
     def _reset_history(self):
         self._curr_step = 0
-        self._max_step = self._args.steps_per_episode
         self._last_obs = None
-        self._action_seqno = 0
-        self._last_obs_action = -1
+        self._curr_action_seqno = 0
+        self._last_obs_action_seqno = -1
         self._terminal_state_reached = False
 
     def _check_done(self):
@@ -146,9 +146,6 @@ class SimpleAnimatWorld(gym.Env):
             return True
 
         # check: step based termination
-        # if self._max_step != np.inf and (self._max_step - self._curr_step) <= 0:
-
-        # TODO: Does this work with max_step == np.inf?
         if (self._max_step - self._curr_step) <= 0:
             return True
 
@@ -192,7 +189,7 @@ class SimpleAnimatWorld(gym.Env):
         return socket
 
     def _create_action_message(self, action):
-        header = {'type': 'action', 'id': self._agent_id, 'seqno': self._action_seqno}
+        header = {'type': 'action', 'id': self._agent_id, 'seqno': self._curr_action_seqno}
         data = {'action': int(action)}
 
         request = {'header': header, 'data': data}
@@ -200,7 +197,7 @@ class SimpleAnimatWorld(gym.Env):
         return request_encoded
 
     def _send_action_to_godot(self, action):
-        self._action_seqno += 1
+        self._curr_action_seqno += 1
 
         if isinstance(action, np.ndarray):
             action = action.tolist()
@@ -227,7 +224,9 @@ class SimpleAnimatWorld(gym.Env):
         return request_encoded
 
     def _send_quit_to_godot(self):
-        print(f'agent {self._agent_id} is attempting to leave the world!')
+        if self._args.verbose:
+            print(f'agent {self._agent_id} is attempting to leave the world!', flush=True)
+
         connection = self._connections[CONN_KEY_ACTIONS]
         connection.send_string(self._create_quit_message())
         _ = connection.recv_json()
@@ -238,10 +237,14 @@ class SimpleAnimatWorld(gym.Env):
             _, obs = self._receive_observation_from_godot()
 
         self._joined_world = False
-        print(f'agent {self._agent_id} has left the world!')
+
+        if self._args.verbose:
+            print(f'agent {self._agent_id} has left the world!', flush=True)
 
     def _send_join_to_godot(self):
-        print(f'agent {self._agent_id} is attempting to join the world!')
+        if self._args.verbose:
+            print(f'agent {self._agent_id} is attempting to join the world!', flush=True)
+
         connection = self._connections[CONN_KEY_ACTIONS]
         connection.send_string(self._create_join_message())
         _ = connection.recv_json()
@@ -254,7 +257,9 @@ class SimpleAnimatWorld(gym.Env):
                 pass
 
         self._joined_world = True
-        print(f'agent {self._agent_id} has joined the world!')
+
+        if self._args.verbose:
+            print(f'agent {self._agent_id} has joined the world!', flush=True)
 
     def _receive_observation_from_godot(self):
         connection = self._connections[CONN_KEY_OBSERVATIONS]
@@ -271,8 +276,11 @@ class SimpleAnimatWorld(gym.Env):
             # split message into meta-data and agent observation
             meta, obs = payload['header'], self._parse_observation(payload['data'])
 
-        except zmq.error.Again as e:
-            print(f'received EAGAIN {e}', flush=True)
+        except zmq.error.Again:
+            pass
+            # print(f'agent {self._agent_id} received EAGAIN while waiting on Godot env observation!',
+            #       flush=True,
+            #       file=sys.stderr)
 
         return meta, obs
 
@@ -282,7 +290,7 @@ class SimpleAnimatWorld(gym.Env):
             data_as_list = data['SMELL'] + [data['SOMATOSENSORY']] + [data['TOUCH']] + data['VELOCITY']
 
             # the last action executed
-            self._last_obs_action = data['LAST_ACTION']
+            self._last_obs_action_seqno = data['LAST_ACTION']
 
             obs = np.round(np.array(data_as_list), decimals=6)
         except KeyError as e:

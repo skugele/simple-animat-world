@@ -9,6 +9,8 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
+from time import time
+
 from stable_baselines.results_plotter import load_results, ts2xy
 from stable_baselines import results_plotter
 
@@ -138,8 +140,6 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
                  freq: Optional[int]):
         super(NonEpisodicEnvMonitor, self).__init__(env=env)
 
-        # TODO: if the filename already exists, need to read its contents to get the starting timestep
-        # TODO: this will occur with the user wants to continue a previous session
         self.filename = filename
         self.save_freq = freq
 
@@ -147,10 +147,6 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
 
         self.needs_reset = True
 
-        # TODO: This is extremely inefficient. Make it better!
-
-        # Output data
-        self.steps = []
         self.rewards = []
 
         self.steps_total = 0
@@ -165,11 +161,8 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
         if not self.needs_reset:
             raise RuntimeError("Tried to reset an environment before done.")
 
-        self.steps = []
         self.rewards = []
-
         self.steps_since_save = 0
-
         self.needs_reset = False
         return self.env.reset(**kwargs)
 
@@ -186,26 +179,26 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
         if done:
             self.needs_reset = True
 
-        self.steps_total += 1
-        self.steps.append(self.steps_total)
-
         self.rewards.append(reward)
 
+        self.steps_total += 1
         self.steps_since_save += 1
+
         if self.steps_since_save >= self.save_freq:
-            out = np.column_stack((np.array(self.steps), np.array(self.rewards)))
+            r = np.array(self.rewards)
 
-            # save results to file
-            with open(self.filename, "ab") as f:
-                np.savetxt(f, out, delimiter=",")
+            # calculate statistics on rewards batch
+            r_n, r_cumm, r_min, r_max = r.shape[0], np.sum(r), np.min(r), np.max(r)
 
-            # stats for watching enjoyment (FIXME: control this with a VERBOSE flag)
             print(
-                f'*** steps: {self.steps_total}; reward: [cumm = {np.sum(out[:, 1])}; avg. = {np.average(out[:, 1])}; std. = {np.std(out[:, 1])}]',
+                f'*** {time()}:\t[n = {r_n}, cumm. = {r_cumm}; min. = {r_min}; max. = {r_max}]',
                 flush=True)
 
+            # save results to file
+            with open(self.filename, "a") as f:
+                f.write(','.join(map(str, [r_n, r_cumm, r_min, r_max])))
+
             self.steps_since_save = 0
-            self.steps = []
             self.rewards = []
 
         return observation, reward, done, info
