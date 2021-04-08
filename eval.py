@@ -191,7 +191,7 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
             r_n, r_cumm, r_min, r_max = r.shape[0], np.sum(r), np.min(r), np.max(r)
 
             print(
-                f'*** {time()}:\t[n = {r_n}, cumm. = {r_cumm}; min. = {r_min}; max. = {r_max}]',
+                f'*** {time()}:\t[n = {r_n}, cumm. = {r_cumm:.3f}; min. = {r_min:.3f}; max. = {r_max:.3f}]',
                 flush=True)
 
             # save results to file
