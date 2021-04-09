@@ -195,8 +195,9 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
                 flush=True)
 
             # save results to file
-            with open(self.filename, "a") as f:
-                f.write(f'{r_n}, {r_cumm}, {r_min}, {r_max}\n')
+            if self.filename:
+                with open(self.filename, "a") as f:
+                    f.write(f'{r_n}, {r_cumm}, {r_min}, {r_max}\n')
 
             self.steps_since_save = 0
             self.rewards = []

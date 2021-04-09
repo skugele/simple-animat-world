@@ -5,6 +5,7 @@ from collections import namedtuple
 from time import time, gmtime, strftime
 from pathlib import Path
 import traceback
+from typing import Optional
 
 import numpy as np
 import tensorflow as tf
@@ -34,8 +35,8 @@ from eval import NonEpisodicEnvMonitor, CustomCheckPointCallback
 # suppressing tensorflow's debug, info, and warning messages
 tf.get_logger().setLevel('ERROR')
 
-DEFAULT_OBSERVATION_PORT = 10001
-DEFAULT_ACTION_PORT = 10002
+GodotInstance = namedtuple('GodotInstance', ['obs_port', 'action_port'])
+GODOT_EVAL_INSTANCE = GodotInstance(9998, 9999)
 
 RUNTIME_PATH = Path('tmp/')
 BASE_MODEL_PATH = Path('save/stable-baselines')
@@ -128,14 +129,16 @@ def get_model_filepath(params, args, filename):
     return params['save_dir'] / filename
 
 
-def get_stats_filepath(session_path, agent_id):
-    """ Gets the filepath to the run statistics file. """
+def get_stats_filepath(session_path, agent_id, eval=False):
+    """ Gets the filepath to the run statistics file."""
 
     stats_dir = session_path / 'monitor'
     stats_dir.mkdir(exist_ok=True)
 
-    # TODO: if the filename ends in ".gz" then numpy will automatically use compression.
-    return stats_dir / f'agent_{agent_id}.csv'
+    if eval:
+        return stats_dir / 'eval.csv'
+    else:
+        return stats_dir / f'agent_{agent_id}.csv'
 
 
 def get_tensorboard_path(session_path):
@@ -146,9 +149,10 @@ def get_tensorboard_path(session_path):
     return tf_dir
 
 
-def init_model(session_path, params, env, args):
+def init_model(session_path, params, env, args, eval=False):
     """ Initialize a stable-baselines model.
 
+    :param eval:
     :param session_path: (str) the session ID
     :param params: algorithm parameters for a supported stable-baselines algorithm.
     :param env: an OpenAI gym environment
@@ -167,27 +171,30 @@ def init_model(session_path, params, env, args):
                               env=env,
                               tensorboard_log=get_tensorboard_path(session_path))
     else:
+        if eval:
+            raise ValueError('evaluation mode requires a saved model.')
+
         return algorithm(policy, env, **params['hyper_params'],
                          verbose=args.verbose,
                          tensorboard_log=get_tensorboard_path(session_path))
 
 
-def make_godot_env(session_path, env_id, agent_id, obs_port, action_port, args, seed=0):
+def make_godot_env(env_id, agent_id, obs_port, action_port, args, session_path, eval=False, seed=0):
     """
     Utility function for multiprocessed env.
 
-    :param session_path: (str) the session ID
     :param env_id: (str) the environment ID
     :param agent_id: the agent identifier in Godot environment
     :param action_port: port number for Godot action server
     :param obs_port: port number for Godot observation publisher
     :param args: command-line arguments (i.e., an argparse parser)
+    :param session_path: (str) the session ID
     :param seed: (int) the initial seed for RNG
     """
 
     def _init():
         env = gym.make(env_id, agent_id=agent_id, obs_port=obs_port, action_port=action_port, args=args)
-        env = NonEpisodicEnvMonitor(env, filename=get_stats_filepath(session_path, agent_id), freq=100)
+        env = NonEpisodicEnvMonitor(env, filename=get_stats_filepath(session_path, agent_id, eval), freq=100)
         env.seed(seed + agent_id)
         return env
 
@@ -195,11 +202,8 @@ def make_godot_env(session_path, env_id, agent_id, obs_port, action_port, args, 
     return _init
 
 
-GodotInstance = namedtuple('GodotInstance', ['obs_port', 'action_port'])
-
-
-def create_env(args, env_id, godot_instances, params, session_path):
-    env = SubprocVecEnv([make_godot_env(session_path, env_id, i, obs_port, action_port, args, seed=i)
+def create_env(args, env_id, godot_instances, params, session_path, eval=False):
+    env = SubprocVecEnv([make_godot_env(env_id, i, obs_port, action_port, args, session_path, eval, seed=i)
                          for i in range(args.n_agents_per_env) for obs_port, action_port in godot_instances])
 
     env_stats_path = get_model_filepath(params, args, filename='vec_normalize.pkl')
@@ -262,7 +266,6 @@ def learn(env, model, params, args):
     :return: None
     """
     # add callbacks
-    # cp_callback = CheckpointCallback(save_freq=1000, save_path=params['save_dir'], name_prefix='model')
     cp_callback = CustomCheckPointCallback(save_path=params['save_dir'], model_filename='model.zip', verbose=1)
 
     # begin training
@@ -287,7 +290,7 @@ def evaluate(model, env, args):
     """
 
     mean, std_dev = evaluate_policy(model, env, n_eval_episodes=5)
-    print(f'Policy evaluation results: mean (reward) = {mean}; std dev (reward) = {std_dev}')
+    print(f'Policy evaluation results: mean (reward) per episode = {mean}; std dev (reward) per episode = {std_dev}')
     return mean, std_dev
 
 
@@ -318,6 +321,10 @@ def init_session(env_id, params, args):
     return session_id, session_path
 
 
+def get_godot_instances(n, starting_obs_port=10001, starting_action_port=10002):
+    return map(lambda i: (starting_obs_port + i * 2, starting_action_port + i * 2), range(n))
+
+
 def main(env_id):
     args = parse_args()
     params = algorithm_params[args.algorithm]
@@ -330,28 +337,18 @@ def main(env_id):
 
     session_id, session_path = init_session(env_id, params, args)
 
-    # FIXME: this assumes that port assignment begins at port 10001, but those ports may not be available!
-    godot_instances = [GodotInstance(o_port, a_port) for o_port, a_port in
-                       map(lambda i: (10001 + i * 2, 10002 + i * 2), range(args.n_godot_instances))]
-
-    env = create_env(args, env_id, godot_instances, params, session_path)
-
     # TODO: Can we automate hyper-parameter optimization?
 
-    model = init_model(session_path, params, env, args)
-
     if args.learn:
+        godot_instances = [GodotInstance(o_port, a_port) for o_port, a_port in
+                           get_godot_instances(args.n_godot_instances)]
+        env = create_env(args, env_id, godot_instances, params, session_path)
+        model = init_model(session_path, params, env, args)
         learn(env, model, params, args)
-
-    # if args.evaluate:
-    #     env = DummyVecEnv([make_godot_env(session_path, env_id, i, args) for i in range(1)])
-    #     model = init_model(session_path, params, env, args)
-    #     evaluate(model, env, args)
-
-    elif args.run:
-        run(model, env, args)
-
-    env.close()
+    if args.evaluate:
+        env = create_env(args, env_id, [GODOT_EVAL_INSTANCE], params, session_path, eval=True)
+        model = init_model(session_path, params, env, args)
+        evaluate(model, env, args)
 
 
 if __name__ == "__main__":
@@ -359,6 +356,7 @@ if __name__ == "__main__":
     try:
         main(env_id='gym_godot:simple-animat-v0')
     except Exception as e:
+        print(f'execution terminated due to the following exception:\n\"{e}\"', file=sys.stderr)
         sys.exit(1)
 
     sys.exit(0)
