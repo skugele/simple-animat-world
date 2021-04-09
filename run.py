@@ -1,18 +1,24 @@
+import os
 import sys
 import re
 import argparse
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from time import time, gmtime, strftime
 from pathlib import Path
 import traceback
 from typing import Optional
 
 import numpy as np
+import optuna
 import tensorflow as tf
 import gym
+import yaml
+from optuna.integration import SkoptSampler
+from optuna.pruners import SuccessiveHalvingPruner, MedianPruner
+from optuna.samplers import RandomSampler, TPESampler
 from stable_baselines.bench import Monitor
 
-from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize, VecFrameStack
 from stable_baselines import DQN, A2C, PPO2, SAC, ACER, ACKTR
 from stable_baselines.common.policies import MlpPolicy, MlpLstmPolicy
 
@@ -23,16 +29,11 @@ from stable_baselines.sac.policies import MlpPolicy as SacMlpPolicy
 from stable_baselines.common.evaluation import evaluate_policy
 from stable_baselines.common import set_global_seeds
 
-# from stable_baselines import results_plotter
-# from stable_baselines.results_plotter import load_results, ts2xy
-# from stable_baselines.common.noise import AdaptiveParamNoiseSpec
-# from stable_baselines.common.callbacks import BaseCallback
-
-from stable_baselines.common.callbacks import CheckpointCallback, CallbackList, EveryNTimesteps
-
 from eval import NonEpisodicEnvMonitor, CustomCheckPointCallback
 
 # suppressing tensorflow's debug, info, and warning messages
+from zoo.utils.hyperparams_opt import hyperparam_optimization, HYPERPARAMS_SAMPLER
+
 tf.get_logger().setLevel('ERROR')
 
 GodotInstance = namedtuple('GodotInstance', ['obs_port', 'action_port'])
@@ -83,8 +84,12 @@ def parse_args():
     # algorithm parameters
     parser.add_argument('--algorithm', metavar='ID', type=str.upper, required=False, default='DQN',
                         help=f'the algorithm to execute. available algorithms: {",".join(algorithm_params.keys())}')
+    parser.add_argument('--max_steps_per_episode', metavar='N', type=int, required=False, default=1000,
+                        help='the maximum number of environment steps to execute per episode')
     parser.add_argument('--steps', metavar='N', type=int, required=False, default=10000,
                         help='the number of environment steps to execute')
+    parser.add_argument('--n_stack', metavar='N', type=int, required=False, default=1,
+                        help='the number of observation frames to stack')
 
     # saved model options
     parser.add_argument('--model', metavar='FILE', type=Path, required=False,
@@ -92,11 +97,19 @@ def parse_args():
     parser.add_argument('--purge', required=False, action="store_true",
                         help='removes previously saved model')
 
+    # hyper-parameter optimization settings
+    parser.add_argument('--sampler', help='sampler to use when optimizing hyper-parameters', type=str,
+                        default='tpe', choices=['random', 'tpe', 'skopt'])
+    parser.add_argument('--pruner', help='pruner to use when optimizing hyper-parameters', type=str,
+                        default='median', choices=['halving', 'median', 'none'])
+
     # modes
     parser.add_argument('--verify', required=False, action="store_true",
                         help='verifies the environment conforms to OpenAI gym standards')
     parser.add_argument('--learn', required=False, action="store_true",
                         help='initiates RL learning session')
+    parser.add_argument('--optimize', required=False, action="store_true",
+                        help='runs a hyper-parameter optimization study')
     parser.add_argument('--evaluate', required=False, action="store_true",
                         help='evaluates the model\'s quality')
     parser.add_argument('--run', required=False, action="store_true",
@@ -180,8 +193,7 @@ def init_model(session_path, params, env, args, eval=False):
 
 
 def make_godot_env(env_id, agent_id, obs_port, action_port, args, session_path, eval=False, seed=0):
-    """
-    Utility function for multiprocessed env.
+    """ Utility function for multiprocessed env.
 
     :param env_id: (str) the environment ID
     :param agent_id: the agent identifier in Godot environment
@@ -203,14 +215,19 @@ def make_godot_env(env_id, agent_id, obs_port, action_port, args, session_path, 
 
 
 def create_env(args, env_id, godot_instances, params, session_path, eval=False):
+    n = 1 if eval else args.n_agents_per_env
     env = SubprocVecEnv([make_godot_env(env_id, i, obs_port, action_port, args, session_path, eval, seed=i)
-                         for i in range(args.n_agents_per_env) for obs_port, action_port in godot_instances])
+                         for i in range(n) for obs_port, action_port in godot_instances])
 
     env_stats_path = get_model_filepath(params, args, filename='vec_normalize.pkl')
     if env_stats_path.exists():
         env = VecNormalize.load(env_stats_path, env)
     else:
         env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=1.0, clip_reward=100.0)
+
+    if args.n_stack > 1:
+        env = VecFrameStack(env, n_stack=args.n_stack)
+
     return env
 
 
@@ -227,9 +244,10 @@ def verify_env(env_id, args):
     env.verify()
 
 
-def purge_model(params, args):
+def purge_model(params, args, interactive=True):
     """ Removes previously saved model file.
 
+    :param interactive:
     :param params: algorithm parameters for a supported stable-baselines algorithm.
     :param args: an argparse parser object containing command-line argument values
     :return: None
@@ -237,10 +255,11 @@ def purge_model(params, args):
     saved_model = get_model_filepath(params, args, filename=args.model)
     saved_stats = get_model_filepath(params, args, filename='vec_normalize.pkl')
 
-    # TODO: need to also remove saved VecNormalize stats
-
     if saved_model.exists():
-        user_input = input(f'purge previous saved model {saved_model} (yes | no)?')
+        if interactive:
+            user_input = input(f'purge previous saved model {saved_model} (yes | no)?')
+        else:
+            user_input = 'yes'
 
         if user_input.lower() in ['yes', 'y']:
             print(f'purge requested. removing previously saved model {saved_model} and stats')
@@ -280,17 +299,114 @@ def learn(env, model, params, args):
     env.save(get_model_filepath(params, args, filename='vec_normalize.pkl'))
 
 
-def evaluate(model, env, args):
+def optimize(env_id, params, args, session_path):
+    # n_trials = 50
+    # n_startup_trials = 10  # prevents pruning until some number of trails have occurred
+    # n_episodes_per_eval = 10
+
+    n_trials = 2
+    n_startup_trials = 1  # prevents pruning until some number of trails have occurred
+    n_episodes_per_eval = 2
+
+    seed = int(time())
+
+    if args.sampler == 'random':
+        sampler = RandomSampler(seed=seed)
+    elif args.sampler == 'tpe':
+        sampler = TPESampler(n_startup_trials=n_startup_trials, seed=seed)
+    elif args.sampler == 'skopt':
+        sampler = SkoptSampler(skopt_kwargs={'base_estimator': "GP", 'acq_func': 'gp_hedge'})
+    else:
+        raise ValueError('Unknown sampler: {}'.format(args.sampler))
+
+    if args.pruner == 'halving':
+        pruner = SuccessiveHalvingPruner(min_resource=1, reduction_factor=4, min_early_stopping_rate=0)
+    elif args.pruner == 'median':
+        pruner = MedianPruner(n_startup_trials=n_startup_trials)
+    elif args.pruner == 'none':
+        # Do not prune
+        pruner = MedianPruner(n_startup_trials=n_trials)
+    else:
+        raise ValueError('Unknown pruner: {}'.format(args.pruner))
+
+    study = optuna.create_study(sampler=sampler, pruner=pruner)
+
+    # the objective function called by optuna during each trial
+    def objective(trial):
+        # copy to preserve original params
+        _params = params.copy()
+
+        _params['hyper_params'] = HYPERPARAMS_SAMPLER[args.algorithm.lower()](trial)
+        _params['save_dir'] = _params['save_dir'] / 'optimizer'
+
+        try:
+            # purge any previously saved models
+            purge_model(_params, args, interactive=False)
+
+            ######################################################
+            # learning phase - on possibly multiple environments #
+            ######################################################
+            godot_instances = [GodotInstance(o_port, a_port) for o_port, a_port in
+                               get_godot_instances(args.n_godot_instances)]
+            env = create_env(args, env_id, godot_instances, _params, session_path)
+
+            # learn and save model
+            model = init_model(session_path, _params, env, args)
+            learn(env, model, _params, args)
+            env.close()
+
+            ##########################################################################
+            # evaluation phase - single environment (deterministic action selection) #
+            ##########################################################################
+            env = create_env(args, env_id, [GODOT_EVAL_INSTANCE], _params, session_path, eval=True)
+
+            # loaded previously learned model and evaluate
+            model = init_model(session_path, _params, env, args, eval=True)
+            mean_reward, _ = evaluate(model, env, args, n_episodes=n_episodes_per_eval)
+            env.close()
+
+        # TODO: I may need to implement some kind of callback to deal with NaNs.
+        except AssertionError:
+            # Sometimes, random hyperparams can generate NaN
+            raise optuna.exceptions.TrialPruned()
+
+        # optuna minimizes the objective by default, so we need to flip the sign to maximize
+        cost = -1 * mean_reward
+        return cost
+
+    try:
+        study.optimize(objective, n_trials=n_trials)
+    except KeyboardInterrupt:
+        pass
+
+    print('Number of finished trials: ', len(study.trials))
+    print('Best trial:')
+    trial = study.best_trial
+
+    print('Value: ', trial.value)
+    print('Params: ')
+    for key, value in trial.params.items():
+        print('    {}: {}'.format(key, value))
+
+    return study.trials_dataframe()
+
+
+def evaluate(model, env, args, n_episodes=5):
     """ Evaluates the goodness of a learned model's behavior policy.
 
     :param model: a model object corresponding to a supported RL algorithm.
     :param env: an OpenAI gym environment
     :param args: command-line arguments (i.e., an argparse parser)
-    :return: tuple containing the mean and std. deviation of the agent's acquired rewards
-    """
+    :param n_episodes: the number of episodes to use for policy evaluation
 
-    mean, std_dev = evaluate_policy(model, env, n_eval_episodes=5)
-    print(f'Policy evaluation results: mean (reward) per episode = {mean}; std dev (reward) per episode = {std_dev}')
+    :return: tuple containing the mean and std. deviation of the agent's acquired rewards over episodes
+    """
+    mean, std_dev = evaluate_policy(model, env, n_eval_episodes=n_episodes)
+
+    if args.verbose:
+        print(
+            f'Policy evaluation results: mean (reward) per episode = {mean}; std dev (reward) per episode = {std_dev}')
+
     return mean, std_dev
 
 
@@ -337,18 +453,31 @@ def main(env_id):
 
     session_id, session_path = init_session(env_id, params, args)
 
-    # TODO: Can we automate hyper-parameter optimization?
+    if args.optimize:
 
-    if args.learn:
+        data_frame = optimize(env_id, params, args, session_path)
+
+        report_name = f'optimizer_results_{args.algorithm}_{int(time())}-{args.sampler}-{args.pruner}.csv'
+        report_path = session_path / report_name
+
+        if args.verbose:
+            print("Writing report to {}".format(report_path))
+
+        data_frame.to_csv(report_path)
+
+    elif args.learn:
         godot_instances = [GodotInstance(o_port, a_port) for o_port, a_port in
                            get_godot_instances(args.n_godot_instances)]
         env = create_env(args, env_id, godot_instances, params, session_path)
         model = init_model(session_path, params, env, args)
         learn(env, model, params, args)
-    if args.evaluate:
+        env.close()
+
+    elif args.evaluate:
         env = create_env(args, env_id, [GODOT_EVAL_INSTANCE], params, session_path, eval=True)
         model = init_model(session_path, params, env, args)
         evaluate(model, env, args)
+        env.close()
 
 
 if __name__ == "__main__":

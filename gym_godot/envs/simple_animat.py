@@ -49,9 +49,7 @@ class SimpleAnimatWorld(gym.Env):
         self._args = args
 
         self._curr_step = 0
-        self._max_step = np.inf # TODO: it may be useful to have max steps at some point, but
-                                # TODO: for now the agent will continue until death
-
+        self._max_step = self._args.max_steps_per_episode
         self._curr_action_seqno = 0
 
         self._last_obs = None
