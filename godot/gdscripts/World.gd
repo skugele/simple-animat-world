@@ -98,7 +98,7 @@ func add_agent(id):
 	agent_registry[id] = agent
 		
 	add_agent_signal_handlers(agent)
-	follow_agent(agent.id)
+#	follow_agent(agent.id)
 	print('agent %s successfully joined the world' % id)
 	
 func remove_agent(id):
