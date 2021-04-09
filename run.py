@@ -300,13 +300,9 @@ def learn(env, model, params, args):
 
 
 def optimize(env_id, params, args, session_path):
-    # n_trials = 50
-    # n_startup_trials = 10  # prevents pruning until some number of trails have occurred
-    # n_episodes_per_eval = 10
-
-    n_trials = 2
-    n_startup_trials = 1  # prevents pruning until some number of trails have occurred
-    n_episodes_per_eval = 2
+    n_trials = 25
+    n_startup_trials = 5  # prevents pruning until some number of trails have occurred
+    n_episodes_per_eval = 10
 
     seed = int(time())
 
