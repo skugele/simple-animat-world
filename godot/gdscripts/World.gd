@@ -98,6 +98,7 @@ func add_agent(id):
 	agent_registry[id] = agent
 		
 	add_agent_signal_handlers(agent)
+	follow_agent(agent.id)
 	print('agent %s successfully joined the world' % id)
 	
 func remove_agent(id):
@@ -105,6 +106,7 @@ func remove_agent(id):
 	
 	if agent_registry.has(id) and agent_registry[id] != null:
 		var agent = agent_registry[id]
+		agent.unset_camera(camera)
 		agent_registry[id] = null
 		agent.call_deferred("queue_free")
 		print('agent %s successfully left the world' % id)
@@ -271,7 +273,8 @@ func follow_observer():
 	if followed_agent:
 		followed_agent.unset_camera(camera)
 	
-	$Observer.set_camera(camera)	
+	$Observer.set_camera(camera)
+	zoom = DEFAULT_ZOOM
 	
 func follow_agent(id):
 	if followed_agent and id == followed_agent.id:
@@ -308,10 +311,6 @@ func _input(event):
 		zoom_in()
 	elif event.is_action_pressed("ui_zoom_out"):
 		zoom_out()
-	elif event.is_action_pressed("next_agent"):
-		follow_next_agent()
-	elif event.is_action_pressed("prev_agent"):
-		follow_prev_agent()
 	elif event.is_action_pressed("follow_observer"):
 		follow_observer()
 	elif event.is_action_pressed("toggle_teleop"):
