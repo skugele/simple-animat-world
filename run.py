@@ -17,8 +17,9 @@ from optuna.integration import SkoptSampler
 from optuna.pruners import SuccessiveHalvingPruner, MedianPruner
 from optuna.samplers import RandomSampler, TPESampler
 from stable_baselines.bench import Monitor
+from stable_baselines.common.callbacks import EvalCallback
 
-from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize, VecFrameStack
+from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize, VecFrameStack, VecCheckNan
 from stable_baselines import DQN, A2C, PPO2, SAC, ACER, ACKTR
 from stable_baselines.common.policies import MlpPolicy, MlpLstmPolicy
 
@@ -29,7 +30,7 @@ from stable_baselines.sac.policies import MlpPolicy as SacMlpPolicy
 from stable_baselines.common.evaluation import evaluate_policy
 from stable_baselines.common import set_global_seeds
 
-from eval import NonEpisodicEnvMonitor, CustomCheckPointCallback
+from eval import EpisodicEnvMonitor, CustomCheckPointCallback
 
 # suppressing tensorflow's debug, info, and warning messages
 from zoo.utils.hyperparams_opt import hyperparam_optimization, HYPERPARAMS_SAMPLER
@@ -84,7 +85,7 @@ def parse_args():
     # algorithm parameters
     parser.add_argument('--algorithm', metavar='ID', type=str.upper, required=False, default='DQN',
                         help=f'the algorithm to execute. available algorithms: {",".join(algorithm_params.keys())}')
-    parser.add_argument('--max_steps_per_episode', metavar='N', type=int, required=False, default=1000,
+    parser.add_argument('--max_steps_per_episode', metavar='N', type=int, required=False, default=500,
                         help='the maximum number of environment steps to execute per episode')
     parser.add_argument('--steps', metavar='N', type=int, required=False, default=10000,
                         help='the number of environment steps to execute')
@@ -102,6 +103,10 @@ def parse_args():
                         default='tpe', choices=['random', 'tpe', 'skopt'])
     parser.add_argument('--pruner', help='pruner to use when optimizing hyper-parameters', type=str,
                         default='median', choices=['halving', 'median', 'none'])
+    parser.add_argument('--n_trials', metavar='N', type=int, required=False, default=20,
+                        help='the number of optimizer trials to run')
+    parser.add_argument('--n_episodes_per_eval', metavar='N', type=int, required=False, default=5,
+                        help='the number of evaluation episodes to use for reward statistics')
 
     # modes
     parser.add_argument('--verify', required=False, action="store_true",
@@ -116,8 +121,8 @@ def parse_args():
                         help='launches an agent using the model\'s policy (no learning occurs during execution)')
 
     # other
-    parser.add_argument('--verbose', required=False, action="store_true",
-                        help='increases verbosity')
+    parser.add_argument('--debug', required=False, action="store_true", help='outputs diagnostic information')
+    parser.add_argument('--verbose', required=False, action="store_true", help='increases verbosity')
     parser.add_argument('--session_id', metavar='ID', type=str, required=False,
                         help='a session id to use (existing or new)', default=None)
 
@@ -177,7 +182,7 @@ def init_model(session_path, params, env, args, eval=False):
                                                                                           filename=args.model)
 
     # Custom MLP policy of two layers of size 32 each with tanh activation function
-    # policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=[8, 8])
+    policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=[4, 4])
 
     if saved_model.exists():
         return algorithm.load(saved_model.absolute(),
@@ -188,6 +193,7 @@ def init_model(session_path, params, env, args, eval=False):
             raise ValueError('evaluation mode requires a saved model.')
 
         return algorithm(policy, env, **params['hyper_params'],
+                         policy_kwargs=policy_kwargs,
                          verbose=args.verbose,
                          tensorboard_log=get_tensorboard_path(session_path))
 
@@ -206,7 +212,7 @@ def make_godot_env(env_id, agent_id, obs_port, action_port, args, session_path, 
 
     def _init():
         env = gym.make(env_id, agent_id=agent_id, obs_port=obs_port, action_port=action_port, args=args)
-        env = NonEpisodicEnvMonitor(env, filename=get_stats_filepath(session_path, agent_id, eval), freq=100)
+        env = EpisodicEnvMonitor(env, filename=get_stats_filepath(session_path, agent_id, eval), freq=100)
         env.seed(seed + agent_id)
         return env
 
@@ -274,7 +280,7 @@ def purge_model(params, args, interactive=True):
             exit(1)
 
 
-def learn(env, model, params, args):
+def learn(env, model, params, args, session_path):
     """ Executes an RL algorithm training loop on the environment for the specified number of steps.
 
     After training results are saved in the specified model file.
@@ -286,6 +292,10 @@ def learn(env, model, params, args):
     """
     # add callbacks
     cp_callback = CustomCheckPointCallback(save_path=params['save_dir'], model_filename='model.zip', verbose=1)
+
+    # eval_env = create_env(args, 'gym_godot:simple-animat-v0', [GODOT_EVAL_INSTANCE], params, session_path, eval=True)
+    # eval_callback = EvalCallback(eval_env, best_model_save_path='./tmp/', log_path='./tmp/', eval_freq=10000,
+    #                              deterministic=True, render=False)
 
     # begin training
     start = time()
@@ -300,16 +310,15 @@ def learn(env, model, params, args):
 
 
 def optimize(env_id, params, args, session_path):
-    n_trials = 25
-    n_startup_trials = 5  # prevents pruning until some number of trails have occurred
-    n_episodes_per_eval = 10
+    n_trials = args.n_trials
+    n_episodes_per_eval = args.n_episodes_per_eval
 
     seed = int(time())
 
     if args.sampler == 'random':
         sampler = RandomSampler(seed=seed)
     elif args.sampler == 'tpe':
-        sampler = TPESampler(n_startup_trials=n_startup_trials, seed=seed)
+        sampler = TPESampler(n_startup_trials=5, seed=seed)
     elif args.sampler == 'skopt':
         sampler = SkoptSampler(skopt_kwargs={'base_estimator': "GP", 'acq_func': 'gp_hedge'})
     else:
@@ -318,7 +327,7 @@ def optimize(env_id, params, args, session_path):
     if args.pruner == 'halving':
         pruner = SuccessiveHalvingPruner(min_resource=1, reduction_factor=4, min_early_stopping_rate=0)
     elif args.pruner == 'median':
-        pruner = MedianPruner(n_startup_trials=n_startup_trials)
+        pruner = MedianPruner(n_startup_trials=5)
     elif args.pruner == 'none':
         # Do not prune
         pruner = MedianPruner(n_startup_trials=n_trials)
@@ -345,6 +354,7 @@ def optimize(env_id, params, args, session_path):
             godot_instances = [GodotInstance(o_port, a_port) for o_port, a_port in
                                get_godot_instances(args.n_godot_instances)]
             env = create_env(args, env_id, godot_instances, _params, session_path)
+            env = VecCheckNan(env, warn_once=False, raise_exception=True)
 
             # learn and save model
             model = init_model(session_path, _params, env, args)
@@ -355,6 +365,7 @@ def optimize(env_id, params, args, session_path):
             # evaluation phase - single environment (deterministic action selection) #
             ##########################################################################
             env = create_env(args, env_id, [GODOT_EVAL_INSTANCE], _params, session_path, eval=True)
+            env = VecCheckNan(env, warn_once=False, raise_exception=True)
 
             # loaded previously learned model and evaluate
             model = init_model(session_path, _params, env, args, eval=True)
@@ -362,7 +373,7 @@ def optimize(env_id, params, args, session_path):
             env.close()
 
         # TODO: I may need to implement some kind of callback to deal with NaNs.
-        except AssertionError:
+        except (AssertionError, ValueError):
             # Sometimes, random hyperparams can generate NaN
             raise optuna.exceptions.TrialPruned()
 
@@ -371,7 +382,7 @@ def optimize(env_id, params, args, session_path):
         return cost
 
     try:
-        study.optimize(objective, n_trials=n_trials)
+        study.optimize(objective, n_trials)
     except KeyboardInterrupt:
         pass
 
@@ -466,7 +477,7 @@ def main(env_id):
                            get_godot_instances(args.n_godot_instances)]
         env = create_env(args, env_id, godot_instances, params, session_path)
         model = init_model(session_path, params, env, args)
-        learn(env, model, params, args)
+        learn(env, model, params, args, session_path)
         env.close()
 
     elif args.evaluate:
