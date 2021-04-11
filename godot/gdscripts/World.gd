@@ -98,7 +98,7 @@ func add_agent(id):
 	agent_registry[id] = agent
 		
 	add_agent_signal_handlers(agent)
-#	follow_agent(agent.id)
+	follow_agent(agent.id)
 	print('agent %s successfully joined the world' % id)
 	
 func remove_agent(id):
@@ -106,8 +106,9 @@ func remove_agent(id):
 	
 	if agent_registry.has(id) and agent_registry[id] != null:
 		var agent = agent_registry[id]
+		follow_observer()
 		agent.unset_camera(camera)
-		agent_registry[id] = null
+		agent_registry.erase(id)
 		agent.call_deferred("queue_free")
 		print('agent %s successfully left the world' % id)
 	else:
