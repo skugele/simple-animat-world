@@ -126,8 +126,8 @@ class CustomCheckPointCallback(BaseCallback):
         self.model.save(self.chkpt_filepath.absolute())
 
 
-class NonEpisodicEnvMonitor(gym.Wrapper):
-    """ A monitor wrapper for non-episodic Gym environments.
+class EpisodicEnvMonitor(gym.Wrapper):
+    """ A monitor wrapper for episodic Gym environments.
 
     :param env: (gym.Env) The environment
     :param filename: (Optional[str]) the location to save a log file, can be None for no log
@@ -138,12 +138,10 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
                  env: gym.Env,
                  filename: Optional[str],
                  freq: Optional[int]):
-        super(NonEpisodicEnvMonitor, self).__init__(env=env)
+        super(EpisodicEnvMonitor, self).__init__(env=env)
 
         self.filename = filename
         self.save_freq = freq
-
-        # TODO: Can we dump the model parameters as well?
 
         self.needs_reset = True
 
@@ -176,31 +174,26 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
             raise RuntimeError("Tried to step environment that needs reset")
 
         observation, reward, done, info = self.env.step(action)
+
         if done:
-            self.needs_reset = True
-
-        self.rewards.append(reward)
-
-        self.steps_total += 1
-        self.steps_since_save += 1
-
-        if self.steps_since_save >= self.save_freq:
             r = np.array(self.rewards)
 
             # calculate statistics on rewards batch
             r_n, r_cumm, r_min, r_max = r.shape[0], np.sum(r), np.min(r), np.max(r)
 
-            print(
-                f'*** {time()}:\t[n = {r_n}, cumm. = {r_cumm:.3f}; min. = {r_min:.3f}; max. = {r_max:.3f}]',
-                flush=True)
+            print(f'*** {time()}:\t[n = {r_n}, cumm. = {r_cumm:.3f}; min. = {r_min:.3f}; max. = {r_max:.3f}]',
+                  flush=True)
 
             # save results to file
             if self.filename:
                 with open(self.filename, "a") as f:
                     f.write(f'{r_n}, {r_cumm}, {r_min}, {r_max}\n')
 
-            self.steps_since_save = 0
             self.rewards = []
+            self.needs_reset = True
+
+        else:
+            self.rewards.append(reward)
 
         return observation, reward, done, info
 
@@ -209,21 +202,6 @@ class NonEpisodicEnvMonitor(gym.Wrapper):
         Closes the environment
         """
         self.env.close()
-
-    def get_total_steps(self) -> int:
-        """
-        Returns the total number of timesteps
-
-        :return: (int)
-        """
-        return self.steps_total
-
-    def stats(self):
-        pass
-
-
-# Helper from the library
-# results_plotter.plot_results([log_dir], 1e5, results_plotter.X_TIMESTEPS, "DDPG LunarLander")
 
 
 def moving_average(values, window):
