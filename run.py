@@ -358,7 +358,7 @@ def optimize(env_id, params, args, session_path):
 
             # learn and save model
             model = init_model(session_path, _params, env, args)
-            learn(env, model, _params, args)
+            learn(env, model, _params, args, session_path)
             env.close()
 
             ##########################################################################
