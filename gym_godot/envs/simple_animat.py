@@ -79,23 +79,24 @@ class SimpleAnimatWorld(gym.Env):
 
         self._send_action_to_godot(action)
 
+        # wait for corresponding observation
         wait_count = 0
-        meta, obs = None, None
+        meta, obs = self._receive_observation_from_godot()
         while self._last_obs_action_seqno < self._curr_action_seqno:
             meta, obs = self._receive_observation_from_godot()
             wait_count += 1
 
-            # assume that the action was lost, resending
+            # assume action message was lost and resend to Godot
             if wait_count % 10 == 0:
-                print(f'agent {self._agent_id} is resending last action {action}',
-                      file=sys.stderr,
-                      flush=True)
                 self._send_action_to_godot(action)
 
         # remaining return values
         reward = self._calculate_reward(obs)
         done = self._check_done()
         info = {'godot_info': meta}  # metadata about agent's observations
+
+        if self._args.debug:
+            print(f'last_obs: {self._last_obs}\nobs: {obs}\nreward: {reward}\ndone: {done}\n')
 
         # this must be set after the call to _calculate_reward!
         self._last_obs = obs
@@ -108,12 +109,13 @@ class SimpleAnimatWorld(gym.Env):
         if self._joined_world:
             self._send_quit_to_godot()
 
-        self._reset_history()
         self._send_join_to_godot()
+        self._reset_history()
 
-        obs, _, _, _ = self.step(0)
+        # wait until observations start flowing for this agent id
+        _, self._last_obs = self._receive_observation_from_godot()
 
-        return obs
+        return self._last_obs
 
     def render(self, mode='noop'):
         """ this is a noop. rendering is done in the Godot engine. """
@@ -144,7 +146,7 @@ class SimpleAnimatWorld(gym.Env):
             return True
 
         # check: step based termination
-        if (self._max_step - self._curr_step) <= 0:
+        if (self._max_step - self._curr_step) < 0:
             return True
 
         return False
@@ -154,7 +156,8 @@ class SimpleAnimatWorld(gym.Env):
 
         # TODO: The hostname needs to be generalized to allow remote connections
         conn_str = 'tcp://localhost:' + str(self._action_port)
-        if args.verbose:
+
+        if self._args.debug:
             print('establishing Godot action client using URL ', conn_str)
 
         socket.connect(conn_str)
@@ -179,7 +182,8 @@ class SimpleAnimatWorld(gym.Env):
 
         # TODO: The hostname needs to be generalized to allow remote connections
         conn_str = 'tcp://localhost:' + str(self._obs_port)
-        if args.verbose:
+
+        if self._args.debug:
             print('establishing Godot sensors subscriber using URL ', conn_str)
 
         socket.connect(conn_str)
@@ -193,17 +197,6 @@ class SimpleAnimatWorld(gym.Env):
         request = {'header': header, 'data': data}
         request_encoded = json.dumps(request)
         return request_encoded
-
-    def _send_action_to_godot(self, action):
-        self._curr_action_seqno += 1
-
-        if isinstance(action, np.ndarray):
-            action = action.tolist()
-
-        connection = self._connections[CONN_KEY_ACTIONS]
-        connection.send_string(self._create_action_message(action))
-
-        _ = connection.recv_json()
 
     def _create_quit_message(self):
         header = {'type': 'quit', 'id': self._agent_id}
@@ -221,64 +214,99 @@ class SimpleAnimatWorld(gym.Env):
         request_encoded = json.dumps(request)
         return request_encoded
 
-    def _send_quit_to_godot(self):
-        if self._args.verbose:
+    def _send(self, connection, message, max_tries=np.inf):
+        wait_count = 0
+
+        while wait_count < max_tries:
+            try:
+                connection.send_string(message)
+            except zmq.error.Again:
+                if self._args.debug:
+                    print(f'Received EAGAIN: Godot was unavailable during send. Retrying.')
+
+                wait_count += 1
+            else:
+                break
+
+    def _receive(self, connection, as_json=False, max_tries=np.inf):
+        wait_count = 0
+
+        message = None
+        while wait_count < max_tries:
+            try:
+                message = connection.recv_json() if as_json else connection.recv_string()
+            except zmq.error.Again:
+                if self._args.debug:
+                    print(f'Received EAGAIN: Godot was unavailable during receive. Retrying.')
+
+                wait_count += 1
+            else:
+                break
+
+        return message
+
+    def _send_action_to_godot(self, action, max_tries=np.inf):
+        self._curr_action_seqno += 1
+
+        if isinstance(action, np.ndarray):
+            action = action.tolist()
+
+        connection = self._connections[CONN_KEY_ACTIONS]
+        message = self._create_action_message(action)
+
+        self._send(connection, message, max_tries=max_tries)
+
+        # ZeroMQ requires that we receive the server's reply before the sending next message!
+        _ = self._receive(connection, as_json=True)
+
+    def _send_quit_to_godot(self, max_tries=np.inf):
+        if self._args.debug:
             print(f'agent {self._agent_id} is attempting to leave the world!', flush=True)
 
         connection = self._connections[CONN_KEY_ACTIONS]
-        connection.send_string(self._create_quit_message())
-        _ = connection.recv_json()
+        message = self._create_quit_message()
+        self._send(connection, message, max_tries=np.inf)
+
+        # ZeroMQ requires that we receive the server's reply before the sending next message!
+        _ = self._receive(connection, as_json=True)
 
         # wait until observations stop flowing for this agent id
-        _, obs = self._receive_observation_from_godot()
+        _, obs = self._receive_observation_from_godot(max_tries=1)
         while obs is not None:
-            _, obs = self._receive_observation_from_godot()
+            _, obs = self._receive_observation_from_godot(max_tries=1)
 
         self._joined_world = False
 
-        if self._args.verbose:
+        if self._args.debug:
             print(f'agent {self._agent_id} has left the world!', flush=True)
 
-    def _send_join_to_godot(self):
-        if self._args.verbose:
+    def _send_join_to_godot(self, max_tries=np.inf):
+        if self._args.debug:
             print(f'agent {self._agent_id} is attempting to join the world!', flush=True)
 
         connection = self._connections[CONN_KEY_ACTIONS]
-        connection.send_string(self._create_join_message())
-        _ = connection.recv_json()
+        message = self._create_join_message()
+        self._send(connection, message)
 
-        # wait until observations start flowing for this agent id
-        while self._last_obs is None:
-            try:
-                _, self._last_obs = self._receive_observation_from_godot()
-            except zmq.error.Again as e:
-                pass
+        # ZeroMQ requires that we receive the server's reply before the sending next message!
+        _ = self._receive(connection, as_json=True, max_tries=max_tries)
 
         self._joined_world = True
 
-        if self._args.verbose:
+        if self._args.debug:
             print(f'agent {self._agent_id} has joined the world!', flush=True)
 
-    def _receive_observation_from_godot(self):
+    def _receive_observation_from_godot(self, max_tries=np.inf):
         connection = self._connections[CONN_KEY_OBSERVATIONS]
 
         meta, obs = None, None
 
-        try:
-            # receive observation message (encoded as TOPIC + [SPACE] + json_encoded(PAYLOAD))
-            _, payload_enc = split(connection.recv_string())
-
-            # unmarshal JSON message content into a dictionary
+        # receive observation message (encoded as TOPIC + [SPACE] + json_encoded(PAYLOAD))
+        message = self._receive(connection, max_tries=max_tries)
+        if message:
+            _, payload_enc = split(message)
             payload = json.loads(payload_enc)
-
-            # split message into meta-data and agent observation
             meta, obs = payload['header'], self._parse_observation(payload['data'])
-
-        except zmq.error.Again:
-            pass
-            # print(f'agent {self._agent_id} received EAGAIN while waiting on Godot env observation!',
-            #       flush=True,
-            #       file=sys.stderr)
 
         return meta, obs
 
@@ -297,7 +325,6 @@ class SimpleAnimatWorld(gym.Env):
         return obs
 
     def _calculate_reward(self, obs):
-        # print(f'obs: {obs}, last_obs: {self._last_obs}')
         new_smell_intensity = obs[0] + obs[1]
         new_satiety = obs[2]
         new_touch = obs[3]
