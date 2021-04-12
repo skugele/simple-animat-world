@@ -171,9 +171,10 @@ def get_tensorboard_path(session_path):
     return tf_dir
 
 
-def init_model(session_path, params, env, args, eval=False):
+def init_model(session_path, params, env, args, eval=False, policy_kwargs=None):
     """ Initialize a stable-baselines model.
 
+    :param policy_kwargs:
     :param eval:
     :param session_path: (str) the session ID
     :param params: algorithm parameters for a supported stable-baselines algorithm.
@@ -184,9 +185,6 @@ def init_model(session_path, params, env, args, eval=False):
     """
     algorithm, policy, saved_model = params['impl'], params['policy'], get_model_filepath(params, args,
                                                                                           filename=args.model)
-
-    # Custom MLP policy of two layers of size 32 each with tanh activation function
-    policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=[4, 4])
 
     if saved_model.exists():
         return algorithm.load(saved_model.absolute(),
@@ -353,6 +351,12 @@ def optimize(env_id, params, args, session_path, session_id):
         _params = params.copy()
 
         _params['hyper_params'] = HYPERPARAMS_SAMPLER[args.algorithm.lower()](trial)
+
+        # network architecture
+        net_arch = trial.suggest_categorical('net_arch', ['4x4', '8x8', '16x16', '32x32'])
+        layers = map(int, net_arch.split('x'))
+        policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=list(layers))
+
         _params['save_dir'] = _params['save_dir'] / 'optimizer'
 
         try:
@@ -368,7 +372,7 @@ def optimize(env_id, params, args, session_path, session_id):
             env = VecCheckNan(env, warn_once=False, raise_exception=True)
 
             # learn and save model
-            model = init_model(session_path, _params, env, args)
+            model = init_model(session_path, _params, env, args, policy_kwargs=policy_kwargs)
             learn(env, model, _params, args, session_path)
             env.close()
 
