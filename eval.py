@@ -176,22 +176,22 @@ class EpisodicEnvMonitor(gym.Wrapper):
         observation, reward, done, info = self.env.step(action)
 
         if done:
-            r = np.array(self.rewards)
-
-            # calculate statistics on rewards batch
-            r_n, r_cumm, r_min, r_max = r.shape[0], np.sum(r), np.min(r), np.max(r)
-
-            print(f'*** {time()}:\t[n = {r_n}, cumm. = {r_cumm:.3f}; min. = {r_min:.3f}; max. = {r_max:.3f}]',
-                  flush=True)
-
-            # save results to file
-            if self.filename:
-                with open(self.filename, "a") as f:
-                    f.write(f'{r_n}, {r_cumm}, {r_min}, {r_max}\n')
-
-            self.rewards = []
             self.needs_reset = True
+            if len(self.rewards) > 0:
+                r = np.array(self.rewards)
 
+                # calculate statistics on rewards batch
+                r_n, r_cumm, r_min, r_max = r.shape[0], np.sum(r), np.min(r), np.max(r)
+
+                print(f'*** {time()}:\t[n = {r_n}, cumm. = {r_cumm:.3f}; min. = {r_min:.3f}; max. = {r_max:.3f}]',
+                      flush=True)
+
+                # save results to file
+                if self.filename:
+                    with open(self.filename, "a") as f:
+                        f.write(f'{r_n}, {r_cumm}, {r_min}, {r_max}\n')
+
+                self.rewards = []
         else:
             self.rewards.append(reward)
 
