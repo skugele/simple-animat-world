@@ -108,6 +108,10 @@ def parse_args():
     parser.add_argument('--n_episodes_per_eval', metavar='N', type=int, required=False, default=5,
                         help='the number of evaluation episodes to use for reward statistics')
 
+    parser.add_argument('--optimizer_study_name', help='name used for the optimizer study', type=str, default=None)
+    parser.add_argument('--optimizer_use_db', help='saves results from optimizer study in a db',
+                        action="store_true", default=None)
+
     # modes
     parser.add_argument('--verify', required=False, action="store_true",
                         help='verifies the environment conforms to OpenAI gym standards')
@@ -309,7 +313,7 @@ def learn(env, model, params, args, session_path):
     env.save(get_model_filepath(params, args, filename='vec_normalize.pkl'))
 
 
-def optimize(env_id, params, args, session_path):
+def optimize(env_id, params, args, session_path, session_id):
     n_trials = args.n_trials
     n_episodes_per_eval = args.n_episodes_per_eval
 
@@ -334,7 +338,14 @@ def optimize(env_id, params, args, session_path):
     else:
         raise ValueError('Unknown pruner: {}'.format(args.pruner))
 
-    study = optuna.create_study(sampler=sampler, pruner=pruner)
+    study_name = args.optimizer_study_name if args.optimizer_study_name else f'{session_id}-optimizer_study'
+    storage = f'sqlite:///{study_name}.db' if args.optimizer_use_db else None
+
+    study = optuna.create_study(study_name=study_name,
+                                storage=storage,
+                                load_if_exists=True,
+                                sampler=sampler,
+                                pruner=pruner)
 
     # the objective function called by optuna during each trial
     def objective(trial):
@@ -372,7 +383,6 @@ def optimize(env_id, params, args, session_path):
             mean_reward, _ = evaluate(model, env, args, n_episodes=n_episodes_per_eval)
             env.close()
 
-        # TODO: I may need to implement some kind of callback to deal with NaNs.
         except (AssertionError, ValueError):
             # Sometimes, random hyperparams can generate NaN
             raise optuna.exceptions.TrialPruned()
@@ -462,7 +472,7 @@ def main(env_id):
 
     if args.optimize:
 
-        data_frame = optimize(env_id, params, args, session_path)
+        data_frame = optimize(env_id, params, args, session_path, session_id)
 
         report_name = f'optimizer_results_{args.algorithm}_{int(time())}-{args.sampler}-{args.pruner}.csv'
         report_path = session_path / report_name
