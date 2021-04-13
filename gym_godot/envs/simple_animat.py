@@ -303,9 +303,9 @@ class SimpleAnimatWorld(gym.Env):
             raise RuntimeError(f'agent {self._agent_id} was unable to send quit messsage to Godot! aborting.')
 
         # wait until observations stop flowing for this agent id
-        _, obs = self._receive_observation_from_godot(max_tries=1)
+        _, obs = self._receive_observation_from_godot()
         while obs is not None:
-            _, obs = self._receive_observation_from_godot(max_tries=1)
+            _, obs = self._receive_observation_from_godot()
 
         self._joined_world = False
 
