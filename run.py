@@ -48,11 +48,24 @@ SAVE_FREQUENCY = 1000  # save freq. in training steps. note: for vectorized envs
 
 algorithm_params = {
     'DQN': {'impl': DQN, 'policy': DqnMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'dqn', 'hyper_params': {}},
-    'PPO2': {'impl': PPO2, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2', 'hyper_params': {}},
-    'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c', 'hyper_params': {}},
-    'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer', 'hyper_params': {}},
-    'SAC': {'impl': SAC, 'policy': SacMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'sac', 'hyper_params': {}},
-    'ACKTR': {'impl': ACKTR, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acktr', 'hyper_params': {}},
+    'PPO2': {'impl': PPO2, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2',
+             'hyper_params': {'nminibatches': 64,
+                              'cliprange': 0.1,
+                              'ent_coef': 0.001792062,
+                              'gamma': 0.99,
+                              'lam': 0.92,
+                              'learning_rate': 0.015307135,
+                              'n_steps': 64,
+                              'noptepochs': 50},
+             'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[4, 4])},
+    'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c', 'hyper_params': {},
+            'policy_kwargs': None},
+    'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer', 'hyper_params': {},
+             'policy_kwargs': None},
+    'SAC': {'impl': SAC, 'policy': SacMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'sac', 'hyper_params': {},
+            'policy_kwargs': None},
+    'ACKTR': {'impl': ACKTR, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acktr', 'hyper_params': {},
+              'policy_kwargs': None},
 }
 
 
@@ -195,7 +208,7 @@ def init_model(session_path, params, env, args, eval=False, policy_kwargs=None):
             raise ValueError('evaluation mode requires a saved model.')
 
         return algorithm(policy, env, **params['hyper_params'],
-                         policy_kwargs=policy_kwargs,
+                         policy_kwargs=params['policy_kwargs'],
                          verbose=args.verbose,
                          tensorboard_log=get_tensorboard_path(session_path))
 

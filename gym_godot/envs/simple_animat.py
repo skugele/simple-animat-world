@@ -9,8 +9,6 @@ from stable_baselines.common.env_checker import check_env
 
 DEFAULT_TIMEOUT = 100  # in milliseconds
 
-STEP_REPEAT_COUNT = 1
-
 # TODO: Set this from an observation from Godot
 DIM_OBSERVATIONS = 6  # SMELL -> 1 & 2, SOMATOSENSORY -> 3, TOUCH -> 4, VELOCITY -> 5 & 6
 # DIM_OBSERVATIONS = 2 # SMELL -> 1 & 2
