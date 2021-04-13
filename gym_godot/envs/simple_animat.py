@@ -7,7 +7,7 @@ import gym
 
 from stable_baselines.common.env_checker import check_env
 
-DEFAULT_TIMEOUT = 100  # in milliseconds
+DEFAULT_TIMEOUT = 5  # in milliseconds
 
 # TODO: Set this from an observation from Godot
 DIM_OBSERVATIONS = 6  # SMELL -> 1 & 2, SOMATOSENSORY -> 3, TOUCH -> 4, VELOCITY -> 5 & 6
@@ -41,6 +41,7 @@ class SimpleAnimatWorld(gym.Env):
     _connections = None
 
     def __init__(self, agent_id, obs_port, action_port, args=None):
+        print(f'debug setting: {args.debug}')
         self._agent_id = agent_id
         self._obs_port = obs_port
         self._action_port = action_port
@@ -57,12 +58,12 @@ class SimpleAnimatWorld(gym.Env):
         self.observation_space = gym.spaces.Box(low=0, high=np.inf, shape=(DIM_OBSERVATIONS,))
 
         # ZeroMQ connection context - shared by all network sockets
-        context = zmq.Context()
+        self._context = zmq.Context()
 
         # establish connections (and fail fast if Godot process not running)
         self._connections = {
-            CONN_KEY_OBSERVATIONS: self._establish_obs_conn(context, args),
-            CONN_KEY_ACTIONS: self._establish_action_conn(context, args)
+            CONN_KEY_OBSERVATIONS: self._establish_obs_conn(args),
+            CONN_KEY_ACTIONS: self._establish_action_conn(args)
         }
 
         self._joined_world = False
@@ -85,7 +86,8 @@ class SimpleAnimatWorld(gym.Env):
             wait_count += 1
 
             # assume action message was lost and resend to Godot
-            if wait_count % 10 == 0:
+            if wait_count % 5 == 0:
+                print(f'agent {self._agent_id} resending action {action}!')
                 self._send_action_to_godot(action)
 
         # remaining return values
@@ -149,8 +151,8 @@ class SimpleAnimatWorld(gym.Env):
 
         return False
 
-    def _establish_action_conn(self, context, args):
-        socket = context.socket(zmq.REQ)
+    def _establish_action_conn(self, args):
+        socket = self._context.socket(zmq.REQ)
 
         # TODO: The hostname needs to be generalized to allow remote connections
         conn_str = 'tcp://localhost:' + str(self._action_port)
@@ -168,9 +170,9 @@ class SimpleAnimatWorld(gym.Env):
     def _get_topic(self):
         return f'/agents/{self._agent_id}'
 
-    def _establish_obs_conn(self, context, args):
+    def _establish_obs_conn(self, args):
         # establish subscriber connection
-        socket = context.socket(zmq.SUB)
+        socket = self._context.socket(zmq.SUB)
 
         # filters messages by topic
         socket.setsockopt_string(zmq.SUBSCRIBE, self._get_topic())
@@ -226,6 +228,29 @@ class SimpleAnimatWorld(gym.Env):
             else:
                 break
 
+    def _receive_response(self, connection, as_json=False, timeout=DEFAULT_TIMEOUT, max_tries_before_reconnect=5):
+        wait_count = 0
+
+        message = None
+        while wait_count < max_tries_before_reconnect:
+            if (connection.poll(timeout)) & zmq.POLLIN != 0:
+                message = connection.recv_json() if as_json else connection.recv_string()
+            else:
+                wait_count += 1
+
+        return message
+
+    def _reconnect(self, connection_type):
+        print(f'reconnecting to server!', flush=True)
+
+        connection = None
+        if connection_type == CONN_KEY_OBSERVATIONS:
+            connection = self._connections[connection_type] = self._establish_obs_conn(self._args)
+        elif connection_type == CONN_KEY_ACTIONS:
+            connection = self._connections[connection_type] = self._establish_action_conn(self._args)
+
+        return connection
+
     def _receive(self, connection, as_json=False, max_tries=np.inf):
         wait_count = 0
 
@@ -243,30 +268,39 @@ class SimpleAnimatWorld(gym.Env):
 
         return message
 
+    def _send_message_to_action_server(self, message, timeout=DEFAULT_TIMEOUT, max_tries = np.inf):
+        connection = self._connections[CONN_KEY_ACTIONS]
+
+        retry_count = 0
+        server_reply = None
+        while server_reply is None and retry_count < max_tries:
+            self._send(connection, message)
+            server_reply = self._receive_response(connection, timeout=timeout, as_json=True)
+
+            # server failed to send reply, attempt a reconnect
+            if not server_reply:
+                connection = self._reconnect(CONN_KEY_ACTIONS)
+                retry_count += 1
+
+        return server_reply is not None
+
     def _send_action_to_godot(self, action, max_tries=np.inf):
         self._curr_action_seqno += 1
 
         if isinstance(action, np.ndarray):
             action = action.tolist()
 
-        connection = self._connections[CONN_KEY_ACTIONS]
         message = self._create_action_message(action)
-
-        self._send(connection, message, max_tries=max_tries)
-
-        # ZeroMQ requires that we receive the server's reply before the sending next message!
-        _ = self._receive(connection, as_json=True)
+        if not self._send_message_to_action_server(message, timeout=10):
+            raise RuntimeError(f'agent {self._agent_id} was unable to send action messsage to Godot! aborting.')
 
     def _send_quit_to_godot(self, max_tries=np.inf):
         if self._args.debug:
             print(f'agent {self._agent_id} is attempting to leave the world!', flush=True)
 
-        connection = self._connections[CONN_KEY_ACTIONS]
         message = self._create_quit_message()
-        self._send(connection, message, max_tries=np.inf)
-
-        # ZeroMQ requires that we receive the server's reply before the sending next message!
-        _ = self._receive(connection, as_json=True)
+        if not self._send_message_to_action_server(message, timeout=100):
+            raise RuntimeError(f'agent {self._agent_id} was unable to send quit messsage to Godot! aborting.')
 
         # wait until observations stop flowing for this agent id
         _, obs = self._receive_observation_from_godot(max_tries=1)
@@ -282,12 +316,9 @@ class SimpleAnimatWorld(gym.Env):
         if self._args.debug:
             print(f'agent {self._agent_id} is attempting to join the world!', flush=True)
 
-        connection = self._connections[CONN_KEY_ACTIONS]
         message = self._create_join_message()
-        self._send(connection, message)
-
-        # ZeroMQ requires that we receive the server's reply before the sending next message!
-        _ = self._receive(connection, as_json=True, max_tries=max_tries)
+        if not self._send_message_to_action_server(message, timeout=100):
+            raise RuntimeError(f'agent {self._agent_id} was unable to send join messsage to Godot! aborting.')
 
         self._joined_world = True
 
@@ -318,7 +349,7 @@ class SimpleAnimatWorld(gym.Env):
 
             obs = np.round(np.array(data_as_list), decimals=6)
         except KeyError as e:
-            print(f'exception {e} occurred in observation message {data}')
+            print(f'exception {e} occurred in observation message {data}', flush=True)
 
         return obs
 
