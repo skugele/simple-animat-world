@@ -7,7 +7,7 @@ import gym
 
 from stable_baselines.common.env_checker import check_env
 
-DEFAULT_TIMEOUT = 5  # in milliseconds
+DEFAULT_TIMEOUT = 50  # in milliseconds
 
 # TODO: Set this from an observation from Godot
 DIM_OBSERVATIONS = 6  # SMELL -> 1 & 2, SOMATOSENSORY -> 3, TOUCH -> 4, VELOCITY -> 5 & 6
@@ -41,7 +41,6 @@ class SimpleAnimatWorld(gym.Env):
     _connections = None
 
     def __init__(self, agent_id, obs_port, action_port, args=None):
-        print(f'debug setting: {args.debug}')
         self._agent_id = agent_id
         self._obs_port = obs_port
         self._action_port = action_port
@@ -79,16 +78,19 @@ class SimpleAnimatWorld(gym.Env):
         self._send_action_to_godot(action)
 
         # wait for corresponding observation
-        wait_count = 0
-        meta, obs = self._receive_observation_from_godot()
+        wait_count = 1
+        meta, obs = self._receive_observation_from_godot(max_tries=1)
         while self._last_obs_action_seqno < self._curr_action_seqno:
-            meta, obs = self._receive_observation_from_godot()
-            wait_count += 1
-
-            # assume action message was lost and resend to Godot
-            if wait_count % 5 == 0:
-                print(f'agent {self._agent_id} resending action {action}!')
+            # after max wait assume action message was lost and resend to Godot
+            if wait_count % 50 == 0:
+                print(f'agent {self._agent_id} resending action {action}!', flush=True)
                 self._send_action_to_godot(action)
+            else:
+                print(f'agent {self._agent_id} waiting to receive obs with action_seqno {self._curr_action_seqno};'
+                    + f'last received {self._last_obs_action_seqno}; wait count {wait_count}', flush=True)
+
+            meta, obs = self._receive_observation_from_godot(max_tries=1)
+            wait_count += 1
 
         # remaining return values
         reward = self._calculate_reward(obs)
@@ -113,7 +115,7 @@ class SimpleAnimatWorld(gym.Env):
         self._reset_history()
 
         # wait until observations start flowing for this agent id
-        _, self._last_obs = self._receive_observation_from_godot()
+        _, self._last_obs = self._receive_observation_from_godot(max_tries=10)
 
         return self._last_obs
 
@@ -164,6 +166,10 @@ class SimpleAnimatWorld(gym.Env):
 
         # configure timeout - without a timeout on receive the process can hang indefinitely
         socket.setsockopt(zmq.RCVTIMEO, DEFAULT_TIMEOUT)
+        socket.setsockopt(zmq.SNDTIMEO, DEFAULT_TIMEOUT)
+
+        # pending messages are discarded immediately on socket close
+        socket.setsockopt(zmq.LINGER, 0)
 
         return socket
 
@@ -179,6 +185,9 @@ class SimpleAnimatWorld(gym.Env):
 
         # configure timeout
         socket.setsockopt(zmq.RCVTIMEO, DEFAULT_TIMEOUT)
+
+        # pending messages are discarded immediately on socket close
+        socket.setsockopt(zmq.LINGER, 0)
 
         # TODO: The hostname needs to be generalized to allow remote connections
         conn_str = 'tcp://localhost:' + str(self._obs_port)
@@ -218,25 +227,30 @@ class SimpleAnimatWorld(gym.Env):
         wait_count = 0
 
         while wait_count < max_tries:
+            # TODO: Should this be changed to a polling method?
             try:
                 connection.send_string(message)
             except zmq.error.Again:
                 if self._args.debug:
-                    print(f'Received EAGAIN: Godot was unavailable during send. Retrying.')
+                    print(f'Received EAGAIN: Godot was unavailable during send. Retrying.', flush=True)
 
                 wait_count += 1
             else:
+                if self._args.debug:
+                    print(f'agent {self._agent_id} sent message {message} to Godot.', flush=True)
                 break
 
     def _receive_response(self, connection, as_json=False, timeout=DEFAULT_TIMEOUT, max_tries_before_reconnect=5):
         wait_count = 0
 
         message = None
-        while wait_count < max_tries_before_reconnect:
+        while message is None and wait_count < max_tries_before_reconnect:
             if (connection.poll(timeout)) & zmq.POLLIN != 0:
                 message = connection.recv_json() if as_json else connection.recv_string()
             else:
                 wait_count += 1
+                if self._args.debug:
+                    print(f'waiting on a response from Godot. current wait count: {wait_count}', flush=True)
 
         return message
 
@@ -251,20 +265,20 @@ class SimpleAnimatWorld(gym.Env):
 
         return connection
 
-    def _receive(self, connection, as_json=False, max_tries=np.inf):
+    def _receive(self, connection, as_json=False, max_tries=2):
         wait_count = 0
 
         message = None
-        while wait_count < max_tries:
+        while message is None and wait_count < max_tries:
             try:
                 message = connection.recv_json() if as_json else connection.recv_string()
             except zmq.error.Again:
                 if self._args.debug:
-                    print(f'Received EAGAIN: Godot was unavailable during receive. Retrying.')
+                    print(f'Received EAGAIN: Godot was unavailable during receive. Retrying.', flush=True)
 
                 wait_count += 1
-            else:
-                break
+                if self._args.debug:
+                    print(f'waiting on a response from Godot. current wait count: {wait_count}', flush=True)
 
         return message
 
@@ -274,13 +288,22 @@ class SimpleAnimatWorld(gym.Env):
         retry_count = 0
         server_reply = None
         while server_reply is None and retry_count < max_tries:
+            if self._args.debug:
+                print(f'agent {self._agent_id} sending message {message} to Godot.', flush=True)
             self._send(connection, message)
             server_reply = self._receive_response(connection, timeout=timeout, as_json=True)
 
             # server failed to send reply, attempt a reconnect
             if not server_reply:
+                if self._args.debug:
+                    print(f'failed to receive a reply from Godot for request {message}.', flush=True)
+                    print(f'reconnect retry count: {retry_count}.', flush=True)
+
                 connection = self._reconnect(CONN_KEY_ACTIONS)
                 retry_count += 1
+            else:
+                if self._args.debug:
+                    print(f'reply received: {server_reply}', flush=True)
 
         return server_reply is not None
 
@@ -303,9 +326,12 @@ class SimpleAnimatWorld(gym.Env):
             raise RuntimeError(f'agent {self._agent_id} was unable to send quit messsage to Godot! aborting.')
 
         # wait until observations stop flowing for this agent id
-        _, obs = self._receive_observation_from_godot()
+        _, obs = self._receive_observation_from_godot(max_tries=1)
         while obs is not None:
-            _, obs = self._receive_observation_from_godot()
+            if self._args.debug:
+                print(f'agent {self._agent_id} left world, but Godot is still sending observations. '
+                    + 'Waiting for them to stop...')
+            _, obs = self._receive_observation_from_godot(max_tries=1)
 
         self._joined_world = False
 
@@ -325,7 +351,7 @@ class SimpleAnimatWorld(gym.Env):
         if self._args.debug:
             print(f'agent {self._agent_id} has joined the world!', flush=True)
 
-    def _receive_observation_from_godot(self, max_tries=np.inf):
+    def _receive_observation_from_godot(self, max_tries):
         connection = self._connections[CONN_KEY_OBSERVATIONS]
 
         meta, obs = None, None
