@@ -383,6 +383,10 @@ func _on_remote_action_received(action_details):
 	var id = header['id']	
 
 	if type == 'action':
+		if not agent_registry.has(id):
+			print('dropping message for non-existent agent %s' % id)
+			return
+			
 		var agent = agent_registry[id]
 		if not agent:
 			print('unknown agent id: ', id)
