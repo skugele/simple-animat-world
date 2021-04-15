@@ -174,6 +174,7 @@ class EpisodicEnvMonitor(gym.Wrapper):
             raise RuntimeError("Tried to step environment that needs reset")
 
         observation, reward, done, info = self.env.step(action)
+        self.rewards.append(reward)
 
         if done:
             self.needs_reset = True
@@ -192,8 +193,6 @@ class EpisodicEnvMonitor(gym.Wrapper):
                         f.write(f'{r_n}, {r_cumm}, {r_min}, {r_max}\n')
 
                 self.rewards = []
-        else:
-            self.rewards.append(reward)
 
         return observation, reward, done, info
 
