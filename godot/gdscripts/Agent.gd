@@ -86,7 +86,7 @@ func _exit_tree():
 #	action_thread.wait_to_finish()
 	
 func _process(delta):
-	var pending_action = pending_actions.pop_front()	
+	var pending_action = pending_actions.pop_back()	
 	if pending_action:
 		execute(pending_action['action'], delta)
 		velocity = move_and_slide(velocity)		
@@ -116,10 +116,10 @@ func add_action(seqno, action):
 	
 #	pending_actions_mutex.lock()
 	if len(pending_actions) > Globals.MAX_PENDING_ACTIONS:
-		var dropped_actions = pending_actions.pop_front()
+		var dropped_actions = pending_actions.pop_back()
 		print('Max queue depth reached. Dropping oldest pending action with value %s.' % dropped_actions)
 		
-	pending_actions.push_back({'seqno': seqno, 'action': action})
+	pending_actions.push_front({'seqno': seqno, 'action': action})
 #	pending_actions_mutex.unlock()
 #	pending_actions_semaphore.post()
 
@@ -200,12 +200,12 @@ func add_scent(origin, scent):
 	
 	if origin.id == antenna_left.id:
 		if active_scents_left.has(scent.smell_emitter_id):
-			active_scents_left[scent.smell_emitter_id].push_back(scent)
+			active_scents_left[scent.smell_emitter_id].push_front(scent)
 		else:
 			active_scents_left[scent.smell_emitter_id] = [scent]
 	elif origin.id == antenna_right.id:
 		if active_scents_right.has(scent.smell_emitter_id):
-			active_scents_right[scent.smell_emitter_id].push_back(scent)
+			active_scents_right[scent.smell_emitter_id].push_front(scent)
 		else:
 			active_scents_right[scent.smell_emitter_id] = [scent]	
 	else:

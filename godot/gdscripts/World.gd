@@ -98,7 +98,7 @@ func add_agent(id):
 	agent_registry[id] = agent
 		
 	add_agent_signal_handlers(agent)
-	follow_agent(agent.id)
+#	follow_agent(agent.id)
 	print('agent %s successfully joined the world' % id)
 	
 func remove_agent(id):
@@ -106,8 +106,8 @@ func remove_agent(id):
 	
 	if agent_registry.has(id) and agent_registry[id] != null:
 		var agent = agent_registry[id]
-		follow_observer()
-		agent.unset_camera(camera)
+#		follow_observer()
+#		agent.unset_camera(camera)
 		agent_registry.erase(id)
 		agent.call_deferred("queue_free")
 		print('agent %s successfully left the world' % id)
@@ -131,7 +131,7 @@ func _physics_process(delta):
 	if (n_food_to_spawn > 0):
 		spawn(n_food_to_spawn, "res://scenes/Food.tscn", $Food)
 	
-	process_event(agent_events.pop_front())
+	process_event(agent_events.pop_back())
 	
 	for agent in agent_registry.values():
 		publish_sensors_state(agent)
@@ -411,10 +411,10 @@ func _on_remote_action_received(action_details):
 		agent.add_action(seqno, actions)
 			
 	elif type == 'quit':
-		agent_events.push_back({'id':id, 'type':'quit'})
+		agent_events.push_front({'id':id, 'type':'quit'})
 		
 	elif type == 'join':
-		agent_events.push_back({'id':id, 'type':'join'})
+		agent_events.push_front({'id':id, 'type':'join'})
 		
 	else:
 		print('unknown request type \'%s\' for agent with id \'%s\'' % [type, id])
