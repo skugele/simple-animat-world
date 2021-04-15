@@ -64,7 +64,6 @@ class SimpleAnimatWorld(gym.Env):
             CONN_KEY_ACTIONS: self._establish_action_conn(args)
         }
 
-        self._joined_world = False
         self._terminal_state_reached = True
 
     def step(self, action):
@@ -83,7 +82,7 @@ class SimpleAnimatWorld(gym.Env):
         meta, obs, last_seqno_recvd = self._receive_observation_from_godot(max_tries=1)
         while last_seqno_recvd is None or last_seqno_recvd < self._action_seqno:
             # after max wait assume action message was lost and resend to Godot
-            if wait_count % 500 == 0:
+            if wait_count % 50 == 0:
                 print(f'agent {self._agent_id} resending action {action}!', flush=True)
                 self._send_action_to_godot(action)
             else:
@@ -110,9 +109,8 @@ class SimpleAnimatWorld(gym.Env):
     def reset(self):
         """ respawns the agent within a running Godot environment and returns an initial observation """
 
-        if self._joined_world:
-            self._send_quit_to_godot()
-
+        # Godot ignores quits for non-existent agent ids. So always send it in case of stale connections.
+        self._send_quit_to_godot()
         self._send_join_to_godot()
         self._reset_history()
 
@@ -138,8 +136,7 @@ class SimpleAnimatWorld(gym.Env):
         pass
 
     def close(self):
-        if self._joined_world:
-            self._send_quit_to_godot()
+        self._send_quit_to_godot()
 
         # explicitly release ZeroMQ socket connections
         for conn in self._connections.values():
@@ -161,7 +158,7 @@ class SimpleAnimatWorld(gym.Env):
             return True
 
         # check: step based termination
-        if (self._max_step - self._curr_step) < 0:
+        if (self._max_step - self._curr_step) <= 0:
             return True
 
         return False
@@ -181,6 +178,8 @@ class SimpleAnimatWorld(gym.Env):
         socket.setsockopt(zmq.RCVTIMEO, DEFAULT_TIMEOUT)
         socket.setsockopt(zmq.SNDTIMEO, DEFAULT_TIMEOUT)
 
+        socket.setsockopt(zmq.SNDHWM, 1)
+
         # pending messages are discarded immediately on socket close
         socket.setsockopt(zmq.LINGER, 0)
 
@@ -198,6 +197,7 @@ class SimpleAnimatWorld(gym.Env):
 
         # configure timeout
         socket.setsockopt(zmq.RCVTIMEO, DEFAULT_TIMEOUT)
+        socket.setsockopt(zmq.RCVHWM, 1)
 
         # pending messages are discarded immediately on socket close
         socket.setsockopt(zmq.LINGER, 0)
@@ -362,8 +362,6 @@ class SimpleAnimatWorld(gym.Env):
         if self._args.debug:
             print(f'agent {self._agent_id} is no longer receiving observations.')
 
-        self._joined_world = False
-
         if self._args.debug:
             print(f'agent {self._agent_id} has left the world!', flush=True)
 
@@ -374,8 +372,6 @@ class SimpleAnimatWorld(gym.Env):
         message = self._create_join_message()
         if not self._send_message_to_action_server(message, timeout=100):
             raise RuntimeError(f'agent {self._agent_id} was unable to send join messsage to Godot! aborting.')
-
-        self._joined_world = True
 
         if self._args.debug:
             print(f'agent {self._agent_id} has joined the world!', flush=True)
