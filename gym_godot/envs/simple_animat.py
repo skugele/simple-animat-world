@@ -80,17 +80,18 @@ class SimpleAnimatWorld(gym.Env):
 
         # wait for corresponding observation
         wait_count = 1
-        meta, obs, last_seqno_recvd = self._receive_observation_from_godot(max_tries=10)
+        meta, obs, last_seqno_recvd = self._receive_observation_from_godot(max_tries=1)
         while last_seqno_recvd is None or last_seqno_recvd < self._action_seqno:
             # after max wait assume action message was lost and resend to Godot
             if wait_count % 500 == 0:
                 print(f'agent {self._agent_id} resending action {action}!', flush=True)
                 self._send_action_to_godot(action)
             else:
-                print(f'agent {self._agent_id} waiting to receive obs with action_seqno {self._action_seqno};'
-                      + f'last received {last_seqno_recvd}; wait count {wait_count}', flush=True)
+                if self._args.debug:
+                    print(f'agent {self._agent_id} waiting to receive obs with action_seqno {self._action_seqno};'
+                          + f'last received {last_seqno_recvd}; wait count {wait_count}', flush=True)
 
-            meta, obs, last_seqno_recvd = self._receive_observation_from_godot(max_tries=10)
+            meta, obs, last_seqno_recvd = self._receive_observation_from_godot(max_tries=1)
             wait_count += 1
 
         # remaining return values
