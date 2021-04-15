@@ -1,0 +1,1 @@
+START /B "" simple-animat-world.exe --obs_port=10001 --action_port=10002 --fps=30
