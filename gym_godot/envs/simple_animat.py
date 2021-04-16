@@ -94,17 +94,17 @@ class SimpleAnimatWorld(gym.Env):
         while obs is None:
             try:
                 _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=10)
-                assert self._last_obs is not None
+                assert self._last_obs is not None, "assertion failed: last obs is None!"
 
                 action_sent = self._send_action_to_godot(action)
-                assert action_sent
+                assert action_sent, "assertion failed: unable to send action!"
 
                 if self._args.debug:
                     print(f'agent {self._agent_id} sent action {action} to Godot.')
 
                 # wait for corresponding observation
                 meta, obs = self._wait_for_action_obs()
-                assert obs is not None
+                assert obs is not None, "assertion failed: last obs is None!"
 
             except (AssertionError, zmq.error.ZMQError) as e:
                 print(f'agent {self._agent_id} received exception when sending action to server: {e}.', flush=True)
@@ -143,7 +143,7 @@ class SimpleAnimatWorld(gym.Env):
                     print(f'agent {self._agent_id} is waiting for observations to arrive...', flush=True)
 
                 _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=100)
-                assert self._last_obs is not None
+                assert self._last_obs is not None, "assertion failed: last obs is None!"
 
             except (AssertionError, zmq.error.ZMQError) as e:
                 print(f'agent {self._agent_id} received exception during reset: {e}.', flush=True)
@@ -334,6 +334,7 @@ class SimpleAnimatWorld(gym.Env):
         while server_reply is None and retry_count < max_tries:
             if self._args.debug:
                 print(f'agent {self._agent_id} sending message {message} to Godot.', flush=True)
+
             self._send(connection, message)
             server_reply = self._receive_response(connection, timeout=timeout, as_json=True)
 
@@ -419,8 +420,8 @@ class SimpleAnimatWorld(gym.Env):
         return obs
 
     def _calculate_reward(self, obs):
-        assert obs is not None
-        assert self._last_obs is not None
+        assert obs is not None, "assertion failed: obs is None in calculate_reward!"
+        assert self._last_obs is not None, "assertion failed: last_obs is None in calculate_reward!"
 
         new_smell_intensity = obs[0] + obs[1]
         new_satiety = obs[2]
