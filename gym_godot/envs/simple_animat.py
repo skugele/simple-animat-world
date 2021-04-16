@@ -66,6 +66,25 @@ class SimpleAnimatWorld(gym.Env):
 
         self._terminal_state_reached = True
 
+    def _wait_for_action_obs(self, max_tries=10):
+        wait_count = 0
+        meta, obs, obs_seqno = self._receive_observation_from_godot(max_tries=1)
+        while obs_seqno is None or \
+              obs_seqno < self._action_seqno or \
+              wait_count > max_tries:
+
+            wait_count += 1
+            if self._args.debug:
+                print(f'agent {self._agent_id} waiting to receive obs with action_seqno {self._action_seqno};'
+                      + f'last received {obs_seqno}; wait count {wait_count}', flush=True)
+
+            meta, obs, obs_seqno = self._receive_observation_from_godot(max_tries=1)
+
+        if wait_count > max_tries:
+            meta, obs = None, None
+
+        return meta, obs
+
     def step(self, action):
         if self._check_done():
             print('error: attempting to step a \'done\' environment!', flush=True)
@@ -73,25 +92,24 @@ class SimpleAnimatWorld(gym.Env):
 
         self._curr_step += 1
 
-        self._send_action_to_godot(action)
-        if self._args.debug:
-            print(f'agent {self._agent_id} sent action {action} to Godot.')
+        _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=10)
+        while self._last_obs is None:
+            self._reconnect(CONN_KEY_ACTIONS)
+            self._last_obs = self.reset(clear_history=False)
 
-        # wait for corresponding observation
-        wait_count = 1
-        meta, obs, last_seqno_recvd = self._receive_observation_from_godot(max_tries=1)
-        while last_seqno_recvd is None or last_seqno_recvd < self._action_seqno:
-            # after max wait assume action message was lost and resend to Godot
-            if wait_count % 50 == 0:
-                print(f'agent {self._agent_id} resending action {action}!', flush=True)
-                self._send_action_to_godot(action)
-            else:
+        meta, obs = None, None
+        while obs is None:
+            if self._send_action_to_godot(action):
                 if self._args.debug:
-                    print(f'agent {self._agent_id} waiting to receive obs with action_seqno {self._action_seqno};'
-                          + f'last received {last_seqno_recvd}; wait count {wait_count}', flush=True)
+                    print(f'agent {self._agent_id} sent action {action} to Godot.')
 
-            meta, obs, last_seqno_recvd = self._receive_observation_from_godot(max_tries=1)
-            wait_count += 1
+                # wait for corresponding observation
+                meta, obs = self._wait_for_action_obs()
+
+            # communication failure with godot -- attempt reconnect to server
+            if obs is None:
+                self._reconnect(CONN_KEY_ACTIONS)
+                self._last_obs = self.reset(clear_history=False)
 
         # remaining return values
         reward = self._calculate_reward(obs)
@@ -106,28 +124,34 @@ class SimpleAnimatWorld(gym.Env):
 
         return obs, reward, done, info
 
-    def reset(self):
+    def reset(self, clear_history=True):
         """ respawns the agent within a running Godot environment and returns an initial observation """
+        resetting = True
+        while resetting:
+            # Godot ignores quits for non-existent agent ids. So always send it in case of stale connections.
+            self._send_quit_to_godot()
+            self._send_join_to_godot()
 
-        # Godot ignores quits for non-existent agent ids. So always send it in case of stale connections.
-        self._send_quit_to_godot()
-        self._send_join_to_godot()
-        self._reset_history()
+            if clear_history:
+                self._reset_history()
 
-        # wait until observations start flowing for this agent id
-        if self._args.debug:
-            print(f'agent {self._agent_id} is waiting for observations to arrive...', flush=True)
+            # wait until observations start flowing for this agent id
+            if self._args.debug:
+                print(f'agent {self._agent_id} is waiting for observations to arrive...', flush=True)
 
-        self._last_obs = None
-        while self._last_obs is None:
-            _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=100)
+            self._last_obs = None
+            while self._last_obs is None:
+                _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=100)
 
-            # if still no observation, try to reconnect to the server
-            if self._last_obs is None:
-                self._reconnect(CONN_KEY_OBSERVATIONS)
+                # if still no observation, try to reconnect to the server
+                if self._last_obs is None:
+                    self._reconnect(CONN_KEY_OBSERVATIONS)
+                    continue
 
-        if self._args.debug:
-            print(f'agent {self._agent_id} is now receiving observations!', flush=True)
+            if self._args.debug:
+                print(f'agent {self._agent_id} is now receiving observations!', flush=True)
+
+            resetting = False
 
         return self._last_obs
 
@@ -323,9 +347,6 @@ class SimpleAnimatWorld(gym.Env):
                 if self._args.debug:
                     print(f'agent {self._agent_id} failed to receive a reply from Godot for request {message}.',
                           flush=True)
-                    print(f'agent {self._agent_id} attempting reconnect; retry count: {retry_count}.', flush=True)
-
-                connection = self._reconnect(CONN_KEY_ACTIONS)
                 retry_count += 1
             else:
                 if self._args.debug:
@@ -335,13 +356,11 @@ class SimpleAnimatWorld(gym.Env):
 
     def _send_action_to_godot(self, action, max_tries=np.inf):
         self._action_seqno += 1
-
         if isinstance(action, np.ndarray):
             action = action.tolist()
 
         message = self._create_action_message(action)
-        if not self._send_message_to_action_server(message, timeout=10):
-            raise RuntimeError(f'agent {self._agent_id} was unable to send action messsage to Godot! aborting.')
+        return self._send_message_to_action_server(message, timeout=10, max_tries=max_tries)
 
     def _send_quit_to_godot(self, max_tries=np.inf):
         if self._args.debug:
