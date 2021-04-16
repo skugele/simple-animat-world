@@ -60,8 +60,8 @@ class SimpleAnimatWorld(gym.Env):
 
         # establish connections (and fail fast if Godot process not running)
         self._connections = {
-            CONN_KEY_OBSERVATIONS: self._establish_obs_conn(args),
-            CONN_KEY_ACTIONS: self._establish_action_conn(args)
+            CONN_KEY_OBSERVATIONS: self._establish_obs_conn(),
+            CONN_KEY_ACTIONS: self._establish_action_conn()
         }
 
         self._terminal_state_reached = True
@@ -69,19 +69,17 @@ class SimpleAnimatWorld(gym.Env):
     def _wait_for_action_obs(self, max_tries=10):
         wait_count = 0
         meta, obs, obs_seqno = self._receive_observation_from_godot(max_tries=1)
-        while obs_seqno is None or \
-              obs_seqno < self._action_seqno or \
-              wait_count > max_tries:
-
+        while obs_seqno is None or obs_seqno < self._action_seqno:
             wait_count += 1
+            if wait_count > max_tries:
+                meta, obs = None, None
+                break
+
             if self._args.debug:
                 print(f'agent {self._agent_id} waiting to receive obs with action_seqno {self._action_seqno};'
                       + f'last received {obs_seqno}; wait count {wait_count}', flush=True)
 
             meta, obs, obs_seqno = self._receive_observation_from_godot(max_tries=1)
-
-        if wait_count > max_tries:
-            meta, obs = None, None
 
         return meta, obs
 
@@ -92,23 +90,27 @@ class SimpleAnimatWorld(gym.Env):
 
         self._curr_step += 1
 
-        _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=10)
-        while self._last_obs is None:
-            self._reconnect(CONN_KEY_ACTIONS)
-            self._last_obs = self.reset(clear_history=False)
-
         meta, obs = None, None
         while obs is None:
-            if self._send_action_to_godot(action):
+            try:
+                _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=10)
+                assert self._last_obs is not None
+
+                action_sent = self._send_action_to_godot(action)
+                assert action_sent
+
                 if self._args.debug:
                     print(f'agent {self._agent_id} sent action {action} to Godot.')
 
                 # wait for corresponding observation
                 meta, obs = self._wait_for_action_obs()
+                assert obs is not None
 
-            # communication failure with godot -- attempt reconnect to server
-            if obs is None:
-                self._reconnect(CONN_KEY_ACTIONS)
+            except (AssertionError, zmq.error.ZMQError) as e:
+                print(f'agent {self._agent_id} received exception when sending action to server: {e}.', flush=True)
+                print(f'agent {self._agent_id} attempting to recover by reconnecting to server')
+
+                self._reconnect()
                 self._last_obs = self.reset(clear_history=False)
 
         # remaining return values
@@ -128,30 +130,29 @@ class SimpleAnimatWorld(gym.Env):
         """ respawns the agent within a running Godot environment and returns an initial observation """
         resetting = True
         while resetting:
-            # Godot ignores quits for non-existent agent ids. So always send it in case of stale connections.
-            self._send_quit_to_godot()
-            self._send_join_to_godot()
+            try:
+                # Godot ignores quits for non-existent agent ids. So always send it in case of stale connections.
+                self._send_quit_to_godot()
+                self._send_join_to_godot()
 
-            if clear_history:
-                self._reset_history()
+                if clear_history:
+                    self._reset_history()
 
-            # wait until observations start flowing for this agent id
-            if self._args.debug:
-                print(f'agent {self._agent_id} is waiting for observations to arrive...', flush=True)
+                # wait until observations start flowing for this agent id
+                if self._args.debug:
+                    print(f'agent {self._agent_id} is waiting for observations to arrive...', flush=True)
 
-            self._last_obs = None
-            while self._last_obs is None:
                 _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=100)
+                assert self._last_obs is not None
 
-                # if still no observation, try to reconnect to the server
-                if self._last_obs is None:
-                    self._reconnect(CONN_KEY_OBSERVATIONS)
-                    continue
+            except (AssertionError, zmq.error.ZMQError) as e:
+                print(f'agent {self._agent_id} received exception during reset: {e}.', flush=True)
+                print(f'agent {self._agent_id} attempting to recover by reconnecting to server')
 
-            if self._args.debug:
-                print(f'agent {self._agent_id} is now receiving observations!', flush=True)
+                self._reconnect()
 
-            resetting = False
+            else:
+                resetting = False
 
         return self._last_obs
 
@@ -187,7 +188,7 @@ class SimpleAnimatWorld(gym.Env):
 
         return False
 
-    def _establish_action_conn(self, args):
+    def _establish_action_conn(self):
         socket = self._context.socket(zmq.REQ)
 
         # TODO: The hostname needs to be generalized to allow remote connections
@@ -212,7 +213,7 @@ class SimpleAnimatWorld(gym.Env):
     def _get_topic(self):
         return f'/agents/{self._agent_id}'
 
-    def _establish_obs_conn(self, args):
+    def _establish_obs_conn(self):
         # establish subscriber connection
         socket = self._context.socket(zmq.SUB)
 
@@ -291,26 +292,20 @@ class SimpleAnimatWorld(gym.Env):
 
         return message
 
-    def _reconnect(self, connection_type):
+    def _reconnect(self):
         print(f'agent {self._agent_id} is reconnecting to server!', flush=True)
 
         # close existing connection
         if self._args.debug:
-            print(f'agent {self._agent_id} is closing old {connection_type} connection!', flush=True)
+            print(f'agent {self._agent_id} is closing old connections!', flush=True)
 
-        connection = self._connections[connection_type]
-        if connection is not None:
+        for connection_type, connection in self._connections.items():
             connection.close(linger=0)
 
-        if self._args.debug:
-            print(f'agent {self._agent_id} is opening new {connection_type} connection!', flush=True)
-
-        if connection_type == CONN_KEY_OBSERVATIONS:
-            connection = self._connections[connection_type] = self._establish_obs_conn(self._args)
-        elif connection_type == CONN_KEY_ACTIONS:
-            connection = self._connections[connection_type] = self._establish_action_conn(self._args)
-
-        return connection
+        self._connections = {
+            CONN_KEY_OBSERVATIONS: self._establish_obs_conn(),
+            CONN_KEY_ACTIONS: self._establish_action_conn()
+        }
 
     def _receive(self, connection, as_json=False, max_tries=2):
         wait_count = 0
