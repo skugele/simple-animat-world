@@ -44,12 +44,12 @@ RUNTIME_PATH = Path('tmp/')
 BASE_MODEL_PATH = Path('save/stable-baselines')
 DEFAULT_MODEL_FILE = Path('model.zip')
 
-SAVE_FREQUENCY = 1000  # save freq. in training steps. note: for vectorized envs this will be n_envs * n_steps_per_env
+SAVE_FREQUENCY = 50000  # save freq. in training steps. note: for vectorized envs this will be n_envs * n_steps_per_env
 
 algorithm_params = {
     'DQN': {'impl': DQN, 'policy': DqnMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'dqn', 'hyper_params': {}},
     'PPO2': {'impl': PPO2, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2',
-             'hyper_params': {'nminibatches': 64,
+             'hyper_params': {'nminibatches': 4,
                               'cliprange': 0.1,
                               'ent_coef': 0.001792062,
                               'gamma': 0.99,
@@ -98,7 +98,7 @@ def parse_args():
     # algorithm parameters
     parser.add_argument('--algorithm', metavar='ID', type=str.upper, required=False, default='DQN',
                         help=f'the algorithm to execute. available algorithms: {",".join(algorithm_params.keys())}')
-    parser.add_argument('--max_steps_per_episode', metavar='N', type=int, required=False, default=500,
+    parser.add_argument('--max_steps_per_episode', metavar='N', type=int, required=False, default=9999,
                         help='the maximum number of environment steps to execute per episode')
     parser.add_argument('--steps', metavar='N', type=int, required=False, default=10000,
                         help='the number of environment steps to execute')
@@ -228,7 +228,7 @@ def make_godot_env(env_id, agent_id, obs_port, action_port, args, session_path, 
     def _init():
         env = gym.make(env_id, agent_id=agent_id, obs_port=obs_port, action_port=action_port, args=args)
         env = EpisodicEnvMonitor(env, filename=get_stats_filepath(session_path, agent_id, eval), freq=100)
-        env.seed(seed + agent_id)
+        env.seed(seed)
         return env
 
     set_global_seeds(seed)
@@ -237,7 +237,8 @@ def make_godot_env(env_id, agent_id, obs_port, action_port, args, session_path, 
 
 def create_env(args, env_id, godot_instances, params, session_path, eval=False):
     n = 1 if eval else args.n_agents_per_env
-    env = SubprocVecEnv([make_godot_env(env_id, i, obs_port, action_port, args, session_path, eval, seed=i)
+    env = SubprocVecEnv([make_godot_env(env_id, f'{obs_port}_{i}', obs_port, action_port,
+                                        args, session_path, eval, seed=obs_port * i)
                          for i in range(n) for obs_port, action_port in godot_instances])
 
     env_stats_path = get_model_filepath(params, args, filename='vec_normalize.pkl')
