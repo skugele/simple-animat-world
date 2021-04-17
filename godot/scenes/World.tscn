@@ -10,7 +10,7 @@ position = Vector2( 0, -1 )
 script = ExtResource( 4 )
 
 [node name="Observer" parent="." instance=ExtResource( 2 )]
-position = Vector2( 4603.29, 0 )
+position = Vector2( 32.1655, 0 )
 
 [node name="Agents" type="Node2D" parent="."]
 
