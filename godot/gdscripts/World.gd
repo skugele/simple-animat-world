@@ -106,8 +106,10 @@ func remove_agent(id):
 	
 	if agent_registry.has(id) and agent_registry[id] != null:
 		var agent = agent_registry[id]
-#		follow_observer()
-#		agent.unset_camera(camera)
+		
+		if agent == followed_agent:
+			follow_observer()
+			
 		agent_registry.erase(id)
 		agent.call_deferred("queue_free")
 		print('agent %s successfully left the world' % id)
@@ -257,17 +259,17 @@ func init_objects():
 		add_agent_signal_handlers(agent)
 		agent_registry[agent.id] = agent
 	
-func follow_next_agent():
-	if not followed_agent:
-		follow_agent(0)
-	else:
-		follow_agent((followed_agent.id + 1) % len(agent_registry))
-
-func follow_prev_agent():
-	if not followed_agent:
-		follow_agent(0)
-	else:
-		follow_agent((followed_agent.id - 1) % len(agent_registry))
+#func follow_next_agent():
+#	if not followed_agent:
+#		follow_agent(0)
+#	else:
+#		follow_agent((followed_agent.id + 1) % len(agent_registry))
+#
+#func follow_prev_agent():
+#	if not followed_agent:
+#		follow_agent(0)
+#	else:
+#		follow_agent((followed_agent.id - 1) % len(agent_registry))
 		
 func follow_observer():
 	# remove camera from previously followed agent (if any)
@@ -277,22 +279,18 @@ func follow_observer():
 	$Observer.set_camera(camera)
 	zoom = DEFAULT_ZOOM
 	
-func follow_agent(id):
-	if followed_agent and id == followed_agent.id:
+func follow_agent(agent):
+	if followed_agent and agent == followed_agent:
 		return
-		
+
+	$Observer.unset_camera(camera)
+			
 	# remove camera from previously followed agent (if any)
 	if followed_agent:
 		followed_agent.unset_camera(camera)
 
-	# add camera to new followed agent
-	if agent_registry.has(id):
-		followed_agent = agent_registry[id]
-
-		$Observer.unset_camera(camera)
-		followed_agent.set_camera(camera)
-	else:
-		$Observer.set_camera(camera)			
+	followed_agent = agent
+	followed_agent.set_camera(camera)
 
 func zoom_in():
 	if camera and zoom - ZOOM_DELTA >= MAX_ZOOM_IN:
@@ -338,6 +336,11 @@ func add_agent_signal_handlers(agent):
 		"agent_consumed_edible", 
 		self, 
 		"_on_agent_consumed_edible")		
+		
+	agent.connect(
+		"agent_selected", 
+		self, 
+		"_on_agent_selected")		
 	
 func process_teleop_action():	
 	var actions = 0
@@ -364,6 +367,12 @@ func _on_agent_consumed_edible(agent, edible):
 		
 	# satiety is always increased after consuming edibles
 	agent.stats.satiety += Globals.SATIETY_PER_UNIT_FOOD
+	
+func _on_agent_selected(agent):
+	if agent == null:
+		return
+		
+	follow_agent(agent)
 		
 func _on_remote_action_received(action_details):
 #	print('received message: ', action_details)

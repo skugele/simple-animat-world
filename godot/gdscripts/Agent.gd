@@ -37,6 +37,7 @@ onready var pending_actions_semaphore = Semaphore.new()
 # signals #
 ###########
 signal agent_consumed_edible(agent, edible)
+signal agent_selected(agent)
 
 # current agent state vars
 onready var velocity = Vector2.ZERO setget set_velocity
@@ -57,7 +58,7 @@ func _ready():
 	
 #	action_thread = Thread.new()
 #	action_thread.start(self, "_process_actions")
-
+		
 func reset():
 	stats.reset()
 	last_action_seqno = -1
@@ -105,7 +106,13 @@ func _process(delta):
 	active_scents_combined = []	
 	active_scents_combined += active_scents_left_combined
 	active_scents_combined += active_scents_right_combined
-	
+
+func _input_event(viewport, event, shape_idx):
+	# This is used to select the agent from the world view
+	if event is InputEventMouseButton:
+		if event.button_index == BUTTON_LEFT and event.pressed:
+			emit_signal("agent_selected", self)
+			
 func print_stats():	
 	print('agent %s\'s health: %s' % [id, stats.health])
 	print('agent %s\'s satiety: %s' % [id, stats.satiety])
