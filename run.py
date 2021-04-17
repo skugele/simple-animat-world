@@ -363,13 +363,18 @@ def optimize(env_id, params, args, session_path, session_id):
     def objective(trial):
         # copy to preserve original params
         _params = params.copy()
-
         _params['hyper_params'] = HYPERPARAMS_SAMPLER[args.algorithm.lower()](trial)
 
         # network architecture
         net_arch = trial.suggest_categorical('net_arch', ['4x4', '8x8', '16x16', '32x32'])
         layers = map(int, net_arch.split('x'))
         policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=list(layers))
+
+        print(f'*** beginning trial {trial.number}')
+        print('\thyper-parameters:')
+        for param, value in _params['hyper_params'].items():
+            print(f'\t\t{param}:{value}')
+        print(f'\t\tnet_arch: {net_arch}')
 
         _params['save_dir'] = _params['save_dir'] / 'optimizer'
 
