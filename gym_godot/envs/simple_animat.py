@@ -7,7 +7,12 @@ import gym
 
 from stable_baselines.common.env_checker import check_env
 
-DEFAULT_TIMEOUT = 50  # in milliseconds
+DEFAULT_RECV_TIMEOUT = 10  # in milliseconds
+DEFAULT_SEND_TIMEOUT = 1000
+
+ACTION_TIMEOUT = 100
+JOIN_TIMEOUT = 1000
+QUIT_TIMEOUT = 1000
 
 # TODO: Set this from an observation from Godot
 DIM_OBSERVATIONS = 6  # SMELL -> 1 & 2, SOMATOSENSORY -> 3, TOUCH -> 4, VELOCITY -> 5 & 6
@@ -93,9 +98,6 @@ class SimpleAnimatWorld(gym.Env):
         meta, obs = None, None
         while obs is None:
             try:
-                _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=10)
-                assert self._last_obs is not None, "assertion failed: last obs is None!"
-
                 action_sent = self._send_action_to_godot(action)
                 assert action_sent, "assertion failed: unable to send action!"
 
@@ -106,7 +108,7 @@ class SimpleAnimatWorld(gym.Env):
                 meta, obs = self._wait_for_action_obs()
                 assert obs is not None, "assertion failed: last obs is None!"
 
-            except (AssertionError, zmq.error.ZMQError) as e:
+            except (AssertionError, RuntimeError, zmq.error.ZMQError) as e:
                 print(f'agent {self._agent_id} received exception when sending action to server: {e}.', flush=True)
                 print(f'agent {self._agent_id} attempting to recover by reconnecting to server')
 
@@ -120,6 +122,8 @@ class SimpleAnimatWorld(gym.Env):
 
         if self._args.debug:
             print(f'last_obs: {self._last_obs}\nobs: {obs}\nreward: {reward}\ndone: {done}\n')
+
+        print(f'agent {self._agent_id} info: {info}')
 
         # this must be set after the call to _calculate_reward!
         self._last_obs = obs
@@ -200,8 +204,8 @@ class SimpleAnimatWorld(gym.Env):
         socket.connect(conn_str)
 
         # configure timeout - without a timeout on receive the process can hang indefinitely
-        socket.setsockopt(zmq.RCVTIMEO, DEFAULT_TIMEOUT)
-        socket.setsockopt(zmq.SNDTIMEO, DEFAULT_TIMEOUT)
+        socket.setsockopt(zmq.RCVTIMEO, DEFAULT_RECV_TIMEOUT)
+        socket.setsockopt(zmq.SNDTIMEO, DEFAULT_SEND_TIMEOUT)
 
         socket.setsockopt(zmq.SNDHWM, 1)
 
@@ -221,7 +225,7 @@ class SimpleAnimatWorld(gym.Env):
         socket.setsockopt_string(zmq.SUBSCRIBE, self._get_topic())
 
         # configure timeout
-        socket.setsockopt(zmq.RCVTIMEO, DEFAULT_TIMEOUT)
+        socket.setsockopt(zmq.RCVTIMEO, DEFAULT_RECV_TIMEOUT)
         socket.setsockopt(zmq.RCVHWM, 1)
 
         # pending messages are discarded immediately on socket close
@@ -278,11 +282,11 @@ class SimpleAnimatWorld(gym.Env):
                     print(f'agent {self._agent_id} sent message {message} to Godot.', flush=True)
                 break
 
-    def _receive_response(self, connection, as_json=False, timeout=DEFAULT_TIMEOUT, max_tries_before_reconnect=5):
+    def _receive_response(self, connection, as_json=False, timeout=DEFAULT_RECV_TIMEOUT, max_tries=5):
         wait_count = 0
 
         message = None
-        while message is None and wait_count < max_tries_before_reconnect:
+        while message is None and wait_count < max_tries:
             if (connection.poll(timeout)) & zmq.POLLIN != 0:
                 message = connection.recv_json() if as_json else connection.recv_string()
             else:
@@ -326,27 +330,18 @@ class SimpleAnimatWorld(gym.Env):
 
         return message
 
-    def _send_message_to_action_server(self, message, timeout=DEFAULT_TIMEOUT, max_tries=np.inf):
+    def _send_message_to_action_server(self, message, timeout=DEFAULT_SEND_TIMEOUT):
         connection = self._connections[CONN_KEY_ACTIONS]
 
-        retry_count = 0
-        server_reply = None
-        while server_reply is None and retry_count < max_tries:
-            if self._args.debug:
-                print(f'agent {self._agent_id} sending message {message} to Godot.', flush=True)
+        if self._args.debug:
+            print(f'agent {self._agent_id} sending message {message} to Godot.', flush=True)
 
-            self._send(connection, message)
-            server_reply = self._receive_response(connection, timeout=timeout, as_json=True)
+        self._send(connection, message)
+        server_reply = self._receive_response(connection, timeout=timeout, as_json=True)
 
-            # server failed to send reply, attempt a reconnect
-            if not server_reply:
-                if self._args.debug:
-                    print(f'agent {self._agent_id} failed to receive a reply from Godot for request {message}.',
-                          flush=True)
-                retry_count += 1
-            else:
-                if self._args.debug:
-                    print(f'agent {self._agent_id} received reply: {server_reply}', flush=True)
+        # server failed to send reply, attempt a reconnect
+        if not server_reply:
+            raise RuntimeError(f'agent {self._agent_id} failed to receive a reply from Godot for request {message}.')
 
         return server_reply is not None
 
@@ -356,23 +351,23 @@ class SimpleAnimatWorld(gym.Env):
             action = action.tolist()
 
         message = self._create_action_message(action)
-        return self._send_message_to_action_server(message, timeout=10, max_tries=max_tries)
+        return self._send_message_to_action_server(message, timeout=ACTION_TIMEOUT)
 
     def _send_quit_to_godot(self, max_tries=np.inf):
         if self._args.debug:
             print(f'agent {self._agent_id} is attempting to leave the world!', flush=True)
 
         message = self._create_quit_message()
-        if not self._send_message_to_action_server(message, timeout=100):
-            raise RuntimeError(f'agent {self._agent_id} was unable to send quit messsage to Godot! aborting.')
+        if not self._send_message_to_action_server(message, timeout=QUIT_TIMEOUT):
+            raise RuntimeError(f'agent {self._agent_id} was unable to send quit messsage to Godot!')
 
         # wait until observations stop flowing for this agent id
-        _, obs, _ = self._receive_observation_from_godot(max_tries=1)
+        _, obs, _ = self._receive_observation_from_godot()
         while obs is not None:
             if self._args.debug:
                 print(f'agent {self._agent_id} left world, but Godot is still sending observations. '
                       + 'Waiting for them to stop...')
-            _, obs, _ = self._receive_observation_from_godot(max_tries=1)
+            _, obs, _ = self._receive_observation_from_godot()
 
         if self._args.debug:
             print(f'agent {self._agent_id} is no longer receiving observations.')
@@ -385,13 +380,13 @@ class SimpleAnimatWorld(gym.Env):
             print(f'agent {self._agent_id} is attempting to join the world!', flush=True)
 
         message = self._create_join_message()
-        if not self._send_message_to_action_server(message, timeout=100):
+        if not self._send_message_to_action_server(message, timeout=JOIN_TIMEOUT):
             raise RuntimeError(f'agent {self._agent_id} was unable to send join messsage to Godot! aborting.')
 
         if self._args.debug:
             print(f'agent {self._agent_id} has joined the world!', flush=True)
 
-    def _receive_observation_from_godot(self, max_tries):
+    def _receive_observation_from_godot(self, max_tries=1):
         connection = self._connections[CONN_KEY_OBSERVATIONS]
 
         header, obs, action_seqno = None, None, None
@@ -445,18 +440,15 @@ class SimpleAnimatWorld(gym.Env):
         # health_delta = health[-1] - health[0]
 
         reward = 0.0
+        reward += 10 * satiety_delta
 
-        # reward += smell_delta
-        reward += 1000 * smell_delta
-        reward += 100 * satiety_delta
+        # reward stronger smells if did not eat (the check is to prevent reward deductions due to
+        # consumed food causing a strong negative smell_delta)
+        reward += 10 * smell_delta if satiety_delta <= 0 else 0.0
 
-        # TODO: agent death?
+        # agent starved. end of episode.
         if new_satiety == 0:
-            reward -= 1000
+            reward -= 500
             self._terminal_state_reached = True
-
-        # reward stronger smells if did not eat
-        # if satiety_delta <= 0:
-        #     reward +=  smell_delta * 100 if smell_delta < 0 else smell_delta * 5
 
         return reward
