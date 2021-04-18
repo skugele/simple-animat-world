@@ -7,12 +7,12 @@ import gym
 
 from stable_baselines.common.env_checker import check_env
 
-DEFAULT_RECV_TIMEOUT = 10  # in milliseconds
-DEFAULT_SEND_TIMEOUT = 1000
+DEFAULT_RECV_TIMEOUT = 100  # in milliseconds
+DEFAULT_SEND_TIMEOUT = 100
 
 ACTION_TIMEOUT = 100
-JOIN_TIMEOUT = 1000
-QUIT_TIMEOUT = 1000
+JOIN_TIMEOUT = 150
+QUIT_TIMEOUT = 150
 
 # TODO: Set this from an observation from Godot
 DIM_OBSERVATIONS = 6  # SMELL -> 1 & 2, SOMATOSENSORY -> 3, TOUCH -> 4, VELOCITY -> 5 & 6
@@ -73,7 +73,7 @@ class SimpleAnimatWorld(gym.Env):
 
     def _wait_for_action_obs(self, max_tries=10):
         wait_count = 0
-        meta, obs, obs_seqno = self._receive_observation_from_godot(max_tries=1)
+        meta, obs, obs_seqno = self._receive_observation_from_godot()
         while obs_seqno is None or obs_seqno < self._action_seqno:
             wait_count += 1
             if wait_count > max_tries:
@@ -84,7 +84,7 @@ class SimpleAnimatWorld(gym.Env):
                 print(f'agent {self._agent_id} waiting to receive obs with action_seqno {self._action_seqno};'
                       + f'last received {obs_seqno}; wait count {wait_count}', flush=True)
 
-            meta, obs, obs_seqno = self._receive_observation_from_godot(max_tries=1)
+            meta, obs, obs_seqno = self._receive_observation_from_godot()
 
         return meta, obs
 
@@ -106,7 +106,7 @@ class SimpleAnimatWorld(gym.Env):
 
                 # wait for corresponding observation
                 meta, obs = self._wait_for_action_obs()
-                assert obs is not None, "assertion failed: last obs is None!"
+                assert obs is not None, "assertion failed: post-action obs is None!"
 
             except (AssertionError, RuntimeError, zmq.error.ZMQError) as e:
                 print(f'agent {self._agent_id} received exception when sending action to server: {e}.', flush=True)
@@ -121,9 +121,8 @@ class SimpleAnimatWorld(gym.Env):
         info = {'godot_info': meta}  # metadata about agent's observations
 
         if self._args.debug:
-            print(f'last_obs: {self._last_obs}\nobs: {obs}\nreward: {reward}\ndone: {done}\n')
-
-        print(f'agent {self._agent_id} info: {info}')
+            print(f'agent {self._agent_id} -> last_obs: {self._last_obs}\nobs: {obs}\nreward: {reward}\ndone: {done}\n')
+            print(f'agent {self._agent_id} -> info: {info}')
 
         # this must be set after the call to _calculate_reward!
         self._last_obs = obs
@@ -149,7 +148,7 @@ class SimpleAnimatWorld(gym.Env):
                 _, self._last_obs, _ = self._receive_observation_from_godot(max_tries=100)
                 assert self._last_obs is not None, "assertion failed: last obs is None!"
 
-            except (AssertionError, zmq.error.ZMQError) as e:
+            except (AssertionError, RuntimeError, zmq.error.ZMQError) as e:
                 print(f'agent {self._agent_id} received exception during reset: {e}.', flush=True)
                 print(f'agent {self._agent_id} attempting to recover by reconnecting to server')
 
@@ -338,8 +337,6 @@ class SimpleAnimatWorld(gym.Env):
 
         self._send(connection, message)
         server_reply = self._receive_response(connection, timeout=timeout, as_json=True)
-
-        # server failed to send reply, attempt a reconnect
         if not server_reply:
             raise RuntimeError(f'agent {self._agent_id} failed to receive a reply from Godot for request {message}.')
 
