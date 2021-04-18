@@ -59,20 +59,28 @@ algorithm_params = {
                               'noptepochs': 50},
              'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[4, 4])},
     'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c',
+            # custom
             'hyper_params': {
-                             'ent_coef': 1.13368963926511E-07,
-                             'vf_coef': 0.047013467,
-                             'gamma': 0.95,
-                             'learning_rate': 0.289785309,
-                             'lr_schedule': 'linear',
-                             'n_steps': 32},
-            'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[32, 32])},
+                'ent_coef': 0.005,
+                'vf_coef': 0.04,
+                'gamma': 0.999,
+                'learning_rate': 0.001,
+                'lr_schedule': 'linear',
+                'n_steps': 16},
+            'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[8, 8])},
     'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer', 'hyper_params': {},
              'policy_kwargs': None},
     'SAC': {'impl': SAC, 'policy': SacMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'sac', 'hyper_params': {},
             'policy_kwargs': None},
-    'ACKTR': {'impl': ACKTR, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acktr', 'hyper_params': {},
-              'policy_kwargs': None},
+    'ACKTR': {'impl': ACKTR, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acktr',
+              'hyper_params': {
+                  'ent_coef': 0.000659822164243082,
+                  'vf_coef': 0.466101158,
+                  'gamma': 0.999,
+                  'learning_rate': 0.947951967,
+                  'lr_schedule': 'linear',
+                  'n_steps': 8},
+              'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[8, 8])},
 }
 
 
@@ -373,7 +381,7 @@ def optimize(env_id, params, args, session_path, session_id):
         _params['hyper_params'] = HYPERPARAMS_SAMPLER[args.algorithm.lower()](trial)
 
         # network architecture
-        net_arch = trial.suggest_categorical('net_arch', ['4x4', '8x8', '16x16', '32x32'])
+        net_arch = trial.suggest_categorical('net_arch', ['8x8', '16x16', '32x32'])
         layers = map(int, net_arch.split('x'))
         policy_kwargs = dict(act_fun=tf.nn.relu, net_arch=list(layers))
 
