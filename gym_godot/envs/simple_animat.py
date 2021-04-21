@@ -71,7 +71,7 @@ class SimpleAnimatWorld(gym.Env):
 
         self._terminal_state_reached = True
 
-    def _wait_for_action_obs(self, max_tries=10):
+    def _wait_for_action_obs(self, max_tries=100):
         wait_count = 0
         meta, obs, obs_seqno = self._receive_observation_from_godot()
         while obs_seqno is None or obs_seqno < self._action_seqno:
@@ -264,10 +264,14 @@ class SimpleAnimatWorld(gym.Env):
         request_encoded = json.dumps(request)
         return request_encoded
 
-    def _send(self, connection, message, max_tries=np.inf):
+    def _send(self, connection, message, max_tries=5):
         wait_count = 0
 
-        while wait_count < max_tries:
+        while True:
+            # REMOVE THIS
+            if wait_count > 0:
+                print(f'agent {self._agent_id} is spinning in _send! (wait count: {wait_count})')
+
             # TODO: Should this be changed to a polling method?
             try:
                 connection.send_string(message)
@@ -276,6 +280,9 @@ class SimpleAnimatWorld(gym.Env):
                     print(f'Received EAGAIN: Godot was unavailable during send. Retrying.', flush=True)
 
                 wait_count += 1
+
+                if wait_count > max_tries:
+                    raise RuntimeError(f'Failed to send message {message}')
             else:
                 if self._args.debug:
                     print(f'agent {self._agent_id} sent message {message} to Godot.', flush=True)
@@ -286,6 +293,10 @@ class SimpleAnimatWorld(gym.Env):
 
         message = None
         while message is None and wait_count < max_tries:
+            # REMOVE THIS
+            if wait_count > 0:
+                print(f'agent {self._agent_id} is spinning in _receive_response! (wait count: {wait_count})')
+
             if (connection.poll(timeout)) & zmq.POLLIN != 0:
                 message = connection.recv_json() if as_json else connection.recv_string()
             else:
@@ -315,6 +326,10 @@ class SimpleAnimatWorld(gym.Env):
 
         message = None
         while message is None and wait_count < max_tries:
+            # REMOVE THIS
+            if wait_count > 0:
+                print(f'agent {self._agent_id} is spinning in _receive! (wait count: {wait_count})')
+
             try:
                 message = connection.recv_json() if as_json else connection.recv_string()
             except zmq.error.Again:
@@ -342,7 +357,7 @@ class SimpleAnimatWorld(gym.Env):
 
         return server_reply is not None
 
-    def _send_action_to_godot(self, action, max_tries=np.inf):
+    def _send_action_to_godot(self, action):
         self._action_seqno += 1
         if isinstance(action, np.ndarray):
             action = action.tolist()
@@ -350,7 +365,7 @@ class SimpleAnimatWorld(gym.Env):
         message = self._create_action_message(action)
         return self._send_message_to_action_server(message, timeout=ACTION_TIMEOUT)
 
-    def _send_quit_to_godot(self, max_tries=np.inf):
+    def _send_quit_to_godot(self):
         if self._args.debug:
             print(f'agent {self._agent_id} is attempting to leave the world!', flush=True)
 
