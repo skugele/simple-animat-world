@@ -1,0 +1,13 @@
+#! /bin/bash
+exports_dir=/home/skugele/Development/simple-animat-world/godot/exports
+
+# linux or server
+proc_type=server
+obs_port=10011
+action_port=10012
+fps=60
+
+exec $exports_dir/${proc_type}/simple-animat-world --obs_port=${obs_port} --action_port=${action_port} --fps=60 1>>/tmp/godot_${obs_port}.out 2>>/tmp/godot_${obs_port}.err
+
+echo "godot engine with obs port ${obs_port} died!!!"
+exit 1

@@ -1,7 +1,7 @@
 #! /bin/bash
 
 # stops godot servers
-proc_dir=/home/skugele/Development/simple-animat-world/scripts/daemontools
+proc_dir=/home/skugele/Development/simple-animat-world/scripts/linux/daemontools
 
 shopt -s nullglob
 
