@@ -16,3 +16,7 @@ tensorboard/
 
 # Virtual environment
 venv/
+
+# Daemontools (linux)
+supervise/
+supervise.log
