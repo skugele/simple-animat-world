@@ -1,0 +1,7 @@
+'ent_coef': 0.08
+'vf_coef': 0.26
+'gamma': 0.9999
+'learning_rate': 0.001
+'lr_schedule': 'linear'
+'n_steps': 32}
+'policy_kwargs': dict(act_fun=tf.nn.relu net_arch=[8, 8])
