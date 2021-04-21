@@ -13,3 +13,6 @@ export_presets.cfg
 
 # Tensorboard generated files
 tensorboard/
+
+# Virtual environment
+venv/
