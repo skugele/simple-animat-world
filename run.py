@@ -43,6 +43,7 @@ GODOT_EVAL_INSTANCE = GodotInstance(9998, 9999)
 RUNTIME_PATH = Path('tmp/')
 BASE_MODEL_PATH = Path('save/stable-baselines')
 DEFAULT_MODEL_FILE = Path('model.zip')
+DEFAULT_VECNORM_FILE = Path('vec_normalize.pkl')
 
 SAVE_FREQUENCY = 50000  # save freq. in training steps. note: for vectorized envs this will be n_envs * n_steps_per_env
 
@@ -50,14 +51,14 @@ algorithm_params = {
     'DQN': {'impl': DQN, 'policy': DqnMlpPolicy, 'save_dir': BASE_MODEL_PATH / 'dqn', 'hyper_params': {}},
     'PPO2': {'impl': PPO2, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'ppo2',
              'hyper_params': {'nminibatches': 4,
-                              'cliprange': 0.1,
-                              'ent_coef': 0.001792062,
-                              'gamma': 0.99,
-                              'lam': 0.92,
-                              'learning_rate': 0.015307135,
+                              'cliprange': 0.4,
+                              'ent_coef': 0.02,
+                              'gamma': 0.999,
+                              'lam': 0.9,
+                              'learning_rate': 0.002,
                               'n_steps': 64,
                               'noptepochs': 50},
-             'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[4, 4])},
+             'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[8, 8])},
     'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c',
             # custom
             'hyper_params': {
@@ -74,7 +75,7 @@ algorithm_params = {
             'policy_kwargs': None},
     'ACKTR': {'impl': ACKTR, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acktr',
               'hyper_params': {
-                  'ent_coef': 0.000659822164243082,
+                  'ent_coef': 0.005,
                   'vf_coef': 0.466101158,
                   'gamma': 0.999,
                   'learning_rate': 0.947951967,
@@ -122,7 +123,9 @@ def parse_args():
 
     # saved model options
     parser.add_argument('--model', metavar='FILE', type=Path, required=False,
-                        help='the saved model\'s filename (existing or new)', default=DEFAULT_MODEL_FILE)
+                        help='the saved model\'s filepath (existing or new)')
+    parser.add_argument('--vecnorm', metavar='FILE', type=Path, required=False,
+                        help='the saved vector normalization filepath (existing or new)')
     parser.add_argument('--purge', required=False, action="store_true",
                         help='removes previously saved model')
 
@@ -157,6 +160,8 @@ def parse_args():
     parser.add_argument('--verbose', required=False, action="store_true", help='increases verbosity')
     parser.add_argument('--session_id', metavar='ID', type=str, required=False,
                         help='a session id to use (existing or new)', default=None)
+    parser.add_argument('--override_params', required=False, action="store_true",
+                        help='overrides the hyperparameters saved with a learned model')
 
     args = parser.parse_args()
 
@@ -169,17 +174,27 @@ def parse_args():
     return args
 
 
-def get_model_filepath(params, args, filename):
+def get_model_filepath(params, args):
     """ Gets the filepath to the saved model file.
 
     :param params: algorithm parameters for a supported stable-baselines algorithm.
     :param args: an argparse parser object containing command-line argument values
     :return:
     """
-    return params['save_dir'] / filename
+    model_filepath = args.model if args.model else params['save_dir'] / DEFAULT_MODEL_FILE
+    return model_filepath
 
+def get_vecnormalize_filepath(params, args):
+    """ Gets the filepath to the normalization stats.
 
-def get_stats_filepath(session_path, agent_id, eval=False):
+    :param params: algorithm parameters for a supported stable-baselines algorithm.
+    :param args: an argparse parser object containing command-line argument values
+    :return:
+    """
+    vecnorm_filepath = args.vecnorm if args.vecnorm else params['save_dir'] / DEFAULT_VECNORM_FILE
+    return vecnorm_filepath
+
+def get_run_stats_filepath(session_path, agent_id, eval=False):
     """ Gets the filepath to the run statistics file."""
 
     stats_dir = session_path / 'monitor'
@@ -211,14 +226,19 @@ def init_model(session_path, params, env, args, eval=False, policy_kwargs=None):
 
     :return: an instantiated stable-baselines model for the requested RL algorithm
     """
-    algorithm, policy, saved_model = params['impl'], params['policy'], get_model_filepath(params, args,
-                                                                                          filename=args.model)
+    algorithm, policy, saved_model = params['impl'], params['policy'], get_model_filepath(params, args)
 
     if saved_model.exists():
-        return algorithm.load(saved_model.absolute(),
-                              env=env,
+        print(f'loading model from {saved_model}')
+
+        hyper_params = params['hyper_params'] if args.override_params else {}
+
+        return algorithm.load(saved_model.absolute(), env, **hyper_params,
+                              verbose=args.verbose,
                               tensorboard_log=get_tensorboard_path(session_path))
     else:
+        print(f'saved model not found. initializing new model using path {saved_model}')
+
         if eval:
             raise ValueError('evaluation mode requires a saved model.')
 
@@ -242,7 +262,7 @@ def make_godot_env(env_id, agent_id, obs_port, action_port, args, session_path, 
 
     def _init():
         env = gym.make(env_id, agent_id=agent_id, obs_port=obs_port, action_port=action_port, args=args)
-        env = EpisodicEnvMonitor(env, filename=get_stats_filepath(session_path, agent_id, eval), freq=100)
+        env = EpisodicEnvMonitor(env, filename=get_run_stats_filepath(session_path, agent_id, eval), freq=100)
         env.seed(seed)
         return env
 
@@ -256,10 +276,12 @@ def create_env(args, env_id, godot_instances, params, session_path, eval=False):
                                         args, session_path, eval, seed=obs_port * i)
                          for i in range(n) for obs_port, action_port in godot_instances])
 
-    env_stats_path = get_model_filepath(params, args, filename='vec_normalize.pkl')
-    if env_stats_path.exists():
-        env = VecNormalize.load(env_stats_path, env)
+    vecnorm_path = get_vecnormalize_filepath(params, args)
+    if vecnorm_path.exists():
+        print(f'found vecnormalize data file @ {vecnorm_path.absolute()}. loading existing file.')
+        env = VecNormalize.load(vecnorm_path, env)
     else:
+        print(f'unable to find existing vecnormalize data file @ vecnorm_path.absolute(). creating a new one.')
         env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=1.0, clip_reward=100.0)
 
     if args.n_stack > 1:
@@ -421,8 +443,8 @@ def optimize(env_id, params, args, session_path, session_id):
             mean_reward, _ = evaluate(model, env, args, n_episodes=n_episodes_per_eval)
             env.close()
 
-        except (AssertionError, ValueError):
-            # Sometimes, random hyperparams can generate NaN
+        except (AssertionError, ValueError) as e:
+            print(f'pruning optimizer trial {trial} due to exception {e}')
             raise optuna.exceptions.TrialPruned()
 
         # optuna minimizes the objective by default, so we need to flip the sign to maximize
