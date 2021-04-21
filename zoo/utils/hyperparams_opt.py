@@ -152,15 +152,19 @@ def sample_ppo2_params(trial):
     :return: (dict)
     """
     batch_size = trial.suggest_categorical('batch_size', [32, 64, 128, 256])
-    n_steps = trial.suggest_categorical('n_steps', [16, 32, 64, 128, 256, 512, 1024, 2048])
-    gamma = trial.suggest_categorical('gamma', [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
+    # batch_size = trial.suggest_categorical('batch_size', [2, 4, 8])
+    n_steps = trial.suggest_categorical('n_steps', [32, 64, 128, 256])
+    # n_steps = trial.suggest_categorical('n_steps', [16, 32, 64, 128, 256, 512, 1024, 2048])
+    # gamma = trial.suggest_categorical('gamma', [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
+    gamma = trial.suggest_categorical('gamma', [0.99, 0.995, 0.999, 0.9999])
     learning_rate = trial.suggest_loguniform('lr', 1e-5, 1)
-    ent_coef = trial.suggest_loguniform('ent_coef', 0.00000001, 0.1)
+    # ent_coef = trial.suggest_loguniform('ent_coef', 0.00000001, 0.1)
+    ent_coef = trial.suggest_loguniform('ent_coef', 0.00001, 0.01)
     cliprange = trial.suggest_categorical('cliprange', [0.1, 0.2, 0.3, 0.4])
     noptepochs = trial.suggest_categorical('noptepochs', [1, 5, 10, 20, 30, 50])
     lam = trial.suggest_categorical('lambda', [0.8, 0.9, 0.92, 0.95, 0.98, 0.99, 1.0])
 
-    if n_steps < batch_size:
+    if n_steps <= batch_size:
         nminibatches = 1
     else:
         nminibatches = int(n_steps / batch_size)
@@ -209,12 +213,15 @@ def sample_acktr_params(trial):
     :param trial: (optuna.trial)
     :return: (dict)
     """
-    gamma = trial.suggest_categorical('gamma', [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
-    n_steps = trial.suggest_categorical('n_steps', [16, 32, 64, 128, 256, 512, 1024, 2048])
+    # gamma = trial.suggest_categorical('gamma', [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
+    gamma = trial.suggest_categorical('gamma', [0.995, 0.999, 0.9999])
+    # n_steps = trial.suggest_categorical('n_steps', [16, 32, 64, 128, 256, 512, 1024, 2048])
+    n_steps = trial.suggest_categorical('n_steps', [8, 16, 32, 64])
     lr_schedule = trial.suggest_categorical('lr_schedule', ['linear', 'constant'])
     learning_rate = trial.suggest_loguniform('lr', 1e-5, 1)
-    ent_coef = trial.suggest_loguniform('ent_coef', 0.00000001, 0.1)
-    vf_coef = trial.suggest_uniform('vf_coef', 0, 1)
+    # ent_coef = trial.suggest_loguniform('ent_coef', 0.00000001, 0.1)
+    ent_coef = trial.suggest_loguniform('ent_coef', 0.0001, 0.1)
+    vf_coef = trial.suggest_uniform('vf_coef', 0.0001, 1)
 
     return {
         'n_steps': n_steps,
@@ -225,6 +232,32 @@ def sample_acktr_params(trial):
         'vf_coef': vf_coef
     }
 
+def sample_acer_params(trial):
+    """
+    Sampler for ACER hyperparams.
+
+    :param trial: (optuna.trial)
+    :return: (dict)
+    """
+    gamma = trial.suggest_categorical('gamma', [0.995, 0.999, 0.9999])
+    n_steps = trial.suggest_categorical('n_steps', [8, 16, 32, 64])
+    lr_schedule = trial.suggest_categorical('lr_schedule', ['linear', 'constant'])
+    learning_rate = trial.suggest_loguniform('lr', 1e-5, 1)
+    q_coef = trial.suggest_loguniform('q_coef', 0.001, 0.1)
+    ent_coef = trial.suggest_loguniform('ent_coef', 0.0001, 0.01)
+    buffer_size = trial.suggest_categorical('buffer_size', [1000, 2500, 5000, 10000, 25000])
+    alpha = trial.suggest_categorical('alpha', [0.9, 0.95, 0.99, 0.995, 0.999, 0.9999])
+
+    return {
+        'n_steps': n_steps,
+        'gamma': gamma,
+        'learning_rate': learning_rate,
+        'lr_schedule': lr_schedule,
+        'q_coef': q_coef,
+        'ent_coef': ent_coef,
+        'buffer_size': buffer_size,
+        'alpha': alpha
+    }
 
 def sample_sac_params(trial):
     """
@@ -403,5 +436,6 @@ HYPERPARAMS_SAMPLER = {
     'ddpg': sample_ddpg_params,
     'her': sample_her_params,
     'acktr': sample_acktr_params,
+    'acer': sample_acer_params,
     'td3': sample_td3_params
 }
