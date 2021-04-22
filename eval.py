@@ -17,6 +17,7 @@ from stable_baselines import results_plotter
 from stable_baselines.common.callbacks import BaseCallback
 
 
+# TODO: Move the callbacks into a separate "callbacks.py" file
 #############
 # Callbacks #
 #############
@@ -214,46 +215,138 @@ def moving_average(values, window):
     return np.convolve(values, weights, 'valid')
 
 
-def plot_results(x, y, window_size=500, title='Learning Curve'):
-    """
-    plot the results
-
-    :param log_folder: (str) the save location of the results to plot
-    :param title: (str) the title of the task to plot
-    """
+def plot_results(x, y, window_size=50, title='', x_label='', y_label='', show=True):
     y = moving_average(y, window=window_size)
-    # # # Truncate x
+
+    # truncate x following data reduction in moving average
     x = x[x.shape[0] - y.shape[0]:]
 
-    fig = plt.figure(title)
+    _fig = plt.figure(title)
     plt.plot(x, y)
-    plt.xlabel('Number of Timesteps')
-    plt.ylabel('Rewards')
-    plt.title(title + " Smoothed")
-    plt.show()
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.title(title)
+
+    if show:
+        plt.show()
 
 
-if __name__ == "__main__":
+def get_data_files_for_series(args):
+    """ parse key/value pairs from command line into a dictionary """
+
+    # {key:'series name', value:'array of file paths'}
+    series_data_files_dict = {}
+
+    if args.data:
+        for item in args.data:
+            key, value = map(lambda v: v.strip(), item.split('='))
+            series_data_files_dict[key] = Path(value)
+
+    return series_data_files_dict
+
+
+def summary(args):
+    raise NotImplementedError('Summary is not yet implemented')
+
+
+def get_n_episodes(cumms_per_file):
+    max_episodes = 0
+    for episodes in cumms_per_file:
+        max_episodes = max(max_episodes, len(episodes))
+
+    return max_episodes
+
+
+def plot(args):
+    # {key:'series name', value:'array of episode-ordered values containing average episode rewards'}
+    avg_per_episode = {}
+
+    # TODO: refactor this to use pandas data frames or np arrays
+    for series, path in get_data_files_for_series(args).items():
+        avg_per_episode[series] = []
+
+        episodes_per_instance = []
+        for file in path.glob('*.csv'):
+            episodes_per_instance.append([])
+            with file.open(mode='r') as fp:
+
+                # CSV fields in files are expected to be formatted as:
+                #    (1) episode length
+                #    (2) avg cumm reward
+                #    (3) min reward per episode
+                #    (4) max reward per episode
+                for line in fp.readlines():
+                    _n, cumm, _min, _max = map(lambda v: v.strip(), line.split(','))
+                    # episodes_per_instance[-1].append(cumm)
+                    episodes_per_instance[-1].append(_n)
+
+                # print(f'cumms for episodes in file {file}')
+                # print(episodes_per_instance[-1])
+
+        n_agents = len(episodes_per_instance)
+        n_episodes = get_n_episodes(episodes_per_instance)
+
+        # this should have length n_episodes. Each index should contain an array of cumms (1 per agent)
+        cumm_rewards_per_episode = []
+
+        for episode_ndx in range(n_episodes):
+            cumm_rewards_per_episode.append([])
+            for instance_ndx in range(n_agents):
+                # add cumms for this agent (if it reach that episode count)
+                if episode_ndx < len(episodes_per_instance[instance_ndx]):
+                    cumm_rewards_per_episode[episode_ndx].append(episodes_per_instance[instance_ndx][episode_ndx])
+
+            # should be at most 75 values per episode (one for each agent that reached that episode number)
+            # print(f'n values for episode {episode_ndx}: {len(cumm_rewards_per_episode[episode_ndx])}')
+            # print(f'len: {len(cumm_rewards_per_episode[episode_ndx])}')
+            if len(cumm_rewards_per_episode[episode_ndx]) < n_agents:
+                break
+
+            array_of_cumms = np.array(cumm_rewards_per_episode[episode_ndx], dtype=np.float64)
+            avg_per_episode[series].append(np.average(array_of_cumms))
+
+        ##################
+        # begin plotting #
+        ##################
+        x = np.arange(len(avg_per_episode[series]))
+
+        # generate avg episode length plot
+        plot_results(x, y=avg_per_episode[series],
+                     title=f'Average Episode Length (algorithm={series})',
+                     x_label='Episode Number',
+                     y_label='Avg. Episode Length (in steps)')
+
+        # generate avg cumm reward per episode plot
+        plot_results(x, y=avg_per_episode[series],
+                     title=f'Average Cumulative Reward Per Episode (algorithm={series})',
+                     x_label='Episode Number',
+                     y_label='Avg. Cumulative Reward Per Episode')
+
+    pass
+
+
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='A driver script for the evaluation of an RL model')
 
-    parser.add_argument('--session_id', metavar='ID', type=str, required=False,
-                        help='a session id to use', default=None)
-    parser.add_argument('--path', metavar='FILE', type=Path, required=False,
-                        help='a path to the data file(s)')
+    parser.add_argument('--data', metavar='KEY=VALUE', nargs='+', required=True,
+                        help='a set of key value pairs. keys represent the names of the data series, and values'
+                             'represent the file paths to the corresponding series data file(s) stored as CSV')
 
     # modes
     parser.add_argument('--summary', required=False, action="store_true",
-                        help='verifies the environment conforms to OpenAI gym standards')
+                        help='provides summary statistics of the supplied data')
     parser.add_argument('--plot', required=False, action="store_true",
-                        help='verifies the environment conforms to OpenAI gym standards')
+                        help='generates plot(s) of the supplied data ')
 
     args = parser.parse_args()
 
-    if not (args.session_id or args.path):
-        exit(1)
+    if args.summary:
+        summary(args)
 
-    if args.session_id:
-        files = Path(f'tmp/{args.session_id}/monitor').glob('*.csv')
-        for file in files:
-            steps, rewards = [a.flatten() for a in np.split(np.loadtxt(file, delimiter=','), 2, axis=1)]
-            plot_results(x=steps, y=rewards)
+    if args.plot:
+        plot(args)
+
+        # files = Path(f'tmp/{args.session_id}/monitor').glob('*.csv')
+        # for file in files:
+        #     steps, rewards = [a.flatten() for a in np.split(np.loadtxt(file, delimiter=','), 2, axis=1)]
+        #     plot_results(x=steps, y=rewards)
