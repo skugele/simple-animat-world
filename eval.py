@@ -6,6 +6,7 @@ from typing import Tuple, Dict, Any, List, Optional
 
 import gym
 import numpy as np
+import pandas as pd
 
 import matplotlib.pyplot as plt
 
@@ -215,20 +216,33 @@ def moving_average(values, window):
     return np.convolve(values, weights, 'valid')
 
 
-def plot_results(x, y, window_size=50, title='', x_label='', y_label='', show=True):
-    y = moving_average(y, window=window_size)
-
-    # truncate x following data reduction in moving average
-    x = x[x.shape[0] - y.shape[0]:]
-
-    _fig = plt.figure(title)
-    plt.plot(x, y)
+def plot_results(df, x_selector='x', y_selector='y', series_selector='series', window_size=50, title='', x_label='',
+                 y_label='', show=True):
+    _fig = plt.figure()
     plt.xlabel(x_label)
     plt.ylabel(y_label)
     plt.title(title)
 
+    legend_labels, legend_handles = [], []
+    for series in df[series_selector].unique():
+        series_df = df[df[series_selector] == series]
+
+        x = series_df[x_selector]
+        y = moving_average(series_df[y_selector], window=window_size)
+
+        # truncate x following data reduction in moving average
+        x = x[x.shape[0] - y.shape[0]:]
+
+        hndl, = plt.plot(x, y, label=series)
+
+        legend_labels.append(series)
+        legend_handles.append(hndl)
+
+    plt.legend(legend_handles, legend_labels)
     if show:
         plt.show()
+
+    return plt
 
 
 def get_data_files_for_series(args):
@@ -258,71 +272,26 @@ def get_n_episodes(cumms_per_file):
 
 
 def plot(args):
-    # {key:'series name', value:'array of episode-ordered values containing average episode rewards'}
-    avg_per_episode = {}
 
-    # TODO: refactor this to use pandas data frames or np arrays
+    # a combined data frame containing stats for all episodes, algorithms, and agents
+    df = None
+
     for series, path in get_data_files_for_series(args).items():
-        avg_per_episode[series] = []
+        for agent_id, file in enumerate(path.glob('*.csv')):
+            file_df = pd.read_csv(file, names=['ep_length', 'cumm_reward', 'min_reward', 'max_reward'])
 
-        episodes_per_instance = []
-        for file in path.glob('*.csv'):
-            episodes_per_instance.append([])
-            with file.open(mode='r') as fp:
+            file_df['ep_number'] = np.arange(len(file_df))
+            file_df['agent_id'] = [agent_id] * len(file_df)
+            file_df['series'] = [series] * len(file_df)
 
-                # CSV fields in files are expected to be formatted as:
-                #    (1) episode length
-                #    (2) avg cumm reward
-                #    (3) min reward per episode
-                #    (4) max reward per episode
-                for line in fp.readlines():
-                    _n, cumm, _min, _max = map(lambda v: v.strip(), line.split(','))
-                    # episodes_per_instance[-1].append(cumm)
-                    episodes_per_instance[-1].append(_n)
+            df = file_df if df is None else df.append(file_df)
 
-                # print(f'cumms for episodes in file {file}')
-                # print(episodes_per_instance[-1])
+    plot_df = df.groupby(['ep_number', 'series'], as_index=False)[['cumm_reward', 'ep_length']].mean()
 
-        n_agents = len(episodes_per_instance)
-        n_episodes = get_n_episodes(episodes_per_instance)
-
-        # this should have length n_episodes. Each index should contain an array of cumms (1 per agent)
-        cumm_rewards_per_episode = []
-
-        for episode_ndx in range(n_episodes):
-            cumm_rewards_per_episode.append([])
-            for instance_ndx in range(n_agents):
-                # add cumms for this agent (if it reach that episode count)
-                if episode_ndx < len(episodes_per_instance[instance_ndx]):
-                    cumm_rewards_per_episode[episode_ndx].append(episodes_per_instance[instance_ndx][episode_ndx])
-
-            # should be at most 75 values per episode (one for each agent that reached that episode number)
-            # print(f'n values for episode {episode_ndx}: {len(cumm_rewards_per_episode[episode_ndx])}')
-            # print(f'len: {len(cumm_rewards_per_episode[episode_ndx])}')
-            if len(cumm_rewards_per_episode[episode_ndx]) < n_agents:
-                break
-
-            array_of_cumms = np.array(cumm_rewards_per_episode[episode_ndx], dtype=np.float64)
-            avg_per_episode[series].append(np.average(array_of_cumms))
-
-        ##################
-        # begin plotting #
-        ##################
-        x = np.arange(len(avg_per_episode[series]))
-
-        # generate avg episode length plot
-        plot_results(x, y=avg_per_episode[series],
-                     title=f'Average Episode Length (algorithm={series})',
-                     x_label='Episode Number',
-                     y_label='Avg. Episode Length (in steps)')
-
-        # generate avg cumm reward per episode plot
-        plot_results(x, y=avg_per_episode[series],
-                     title=f'Average Cumulative Reward Per Episode (algorithm={series})',
-                     x_label='Episode Number',
-                     y_label='Avg. Cumulative Reward Per Episode')
-
-    pass
+    plot_results(plot_df, x_selector='ep_number', y_selector='cumm_reward', title='Average Cumulative Reward',
+                 x_label='Episode', y_label='Cumulative Reward')
+    plot_results(plot_df, x_selector='ep_number', y_selector='ep_length', title='Average Episode Length (in steps)',
+                 x_label='Episode', y_label='Number of Steps')
 
 
 if __name__ == '__main__':
