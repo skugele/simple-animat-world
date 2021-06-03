@@ -62,12 +62,12 @@ algorithm_params = {
     'A2C': {'impl': A2C, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'a2c',
             # custom
             'hyper_params': {
-                'ent_coef': 0.005,
-                'vf_coef': 0.04,
+                'ent_coef': 0.002,
+                'vf_coef': 0.2,
                 'gamma': 0.999,
-                'learning_rate': 0.001,
-                'lr_schedule': 'linear',
-                'n_steps': 16},
+                'learning_rate': 0.3,
+                'lr_schedule': 'constant',
+                'n_steps': 256},
             'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[8, 8])},
     'ACER': {'impl': ACER, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'acer', 'hyper_params': {},
              'policy_kwargs': None},
@@ -82,6 +82,9 @@ algorithm_params = {
                   'lr_schedule': 'linear',
                   'n_steps': 8},
               'policy_kwargs': dict(act_fun=tf.nn.relu, net_arch=[8, 8])},
+    # TRPO requires OpenMPI
+    # 'TRPO': {'impl': TRPO, 'policy': MlpPolicy, 'save_dir': BASE_MODEL_PATH / 'trpo',
+    #           'hyper_params': {}},
 }
 
 
@@ -184,7 +187,7 @@ def get_model_filepath(params, args):
     model_filepath = args.model if args.model else params['save_dir'] / DEFAULT_MODEL_FILE
     return model_filepath
 
-def get_vecnormalize_filepath(params, args):
+def get_vec_normalize_filepath(params, args):
     """ Gets the filepath to the normalization stats.
 
     :param params: algorithm parameters for a supported stable-baselines algorithm.
@@ -276,7 +279,7 @@ def create_env(args, env_id, godot_instances, params, session_path, eval=False):
                                         args, session_path, eval, seed=obs_port * i)
                          for i in range(n) for obs_port, action_port in godot_instances])
 
-    vecnorm_path = get_vecnormalize_filepath(params, args)
+    vecnorm_path = get_vec_normalize_filepath(params, args)
     if vecnorm_path.exists():
         print(f'found vecnormalize data file @ {vecnorm_path.absolute()}. loading existing file.')
         env = VecNormalize.load(vecnorm_path, env)
@@ -311,8 +314,8 @@ def purge_model(params, args, interactive=True):
     :param args: an argparse parser object containing command-line argument values
     :return: None
     """
-    saved_model = get_model_filepath(params, args, filename=args.model)
-    saved_stats = get_model_filepath(params, args, filename='vec_normalize.pkl')
+    saved_model = get_model_filepath(params, args)
+    saved_stats = get_vec_normalize_filepath(params, args)
 
     if saved_model.exists():
         if interactive:
@@ -358,8 +361,8 @@ def learn(env, model, params, args, session_path):
     print(f'elapsed time: {strftime("%H:%M:%S", gmtime(end - start))}')
 
     # save training results
-    model.save(get_model_filepath(params, args, filename=args.model))
-    env.save(get_model_filepath(params, args, filename='vec_normalize.pkl'))
+    model.save(get_model_filepath(params, args))
+    env.save(get_vec_normalize_filepath(params, args))
 
 
 def optimize(env_id, params, args, session_path, session_id):
