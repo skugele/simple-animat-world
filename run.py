@@ -184,6 +184,7 @@ def get_model_filepath(params, args):
     model_filepath = args.model if args.model else params['save_dir'] / DEFAULT_MODEL_FILE
     return model_filepath
 
+
 def get_vecnormalize_filepath(params, args):
     """ Gets the filepath to the normalization stats.
 
@@ -193,6 +194,7 @@ def get_vecnormalize_filepath(params, args):
     """
     vecnorm_filepath = args.vecnorm if args.vecnorm else params['save_dir'] / DEFAULT_VECNORM_FILE
     return vecnorm_filepath
+
 
 def get_run_stats_filepath(session_path, agent_id, eval=False):
     """ Gets the filepath to the run statistics file."""
@@ -554,6 +556,19 @@ def main(env_id):
         env = create_env(args, env_id, [GODOT_EVAL_INSTANCE], params, session_path, eval=True)
         model = init_model(session_path, params, env, args)
         evaluate(model, env, args)
+        env.close()
+
+    elif args.run:
+        godot_instances = [GodotInstance(o_port, a_port) for o_port, a_port in
+                           get_godot_instances(args.n_godot_instances)]
+        env = create_env(args, env_id, godot_instances, params, session_path)
+        model = init_model(session_path, params, env, args)
+
+        obs = env.reset()
+        for i in range(args.steps):
+            action, _states = model.predict(obs)
+            obs, rewards, done, info = env.step(action)
+
         env.close()
 
 
